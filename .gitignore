@@ -1,0 +1,37 @@
+# AI 配置文件（不推送远程）
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+.omc/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+build/
+dist/
+*.spec
+
+# 临时调试产物（离屏渲染截图 / 一次性脚本）
+/_shots/
+_shot.py
+_audit.py
+
+# 运行产物
+*.bak
+*.bak[0-9]*
+/output/
+/Unpacked_Output/
+
+# 本地配置与索引缓存（每台机器不同，不入库）
+config.json
+mod_index.json
+
+# 编辑器
+.idea/
+.vscode/
+
+examples_pic/

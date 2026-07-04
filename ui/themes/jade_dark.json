@@ -1,0 +1,25 @@
+{
+  "id": "jade_dark",
+  "name": "朱红·墨",
+  "variant": "dark",
+  "author": "KKTools",
+  "tokens": {
+    "bg": "#1a1817",
+    "bg_deep": "#121110",
+    "surface": "#24211f",
+    "surface_alt": "#2c2826",
+    "border": "#3d3734",
+    "border_soft": "#2e2a27",
+    "text": "#e6e3e0",
+    "text_strong": "#f5f2ef",
+    "text_muted": "#a39d97",
+    "text_dim": "#938d86",
+    "accent": "#c44b4b",
+    "selection": "#4a2020",
+    "primary": "#a83a3a",
+    "on_primary": "#faf4f0",
+    "danger": "#cf5a4a",
+    "success": "#5a9e6f"
+  },
+  "shape": { "radius": 6, "radius_sm": 4, "radius_lg": 10 }
+}

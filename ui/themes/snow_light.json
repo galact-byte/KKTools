@@ -1,0 +1,25 @@
+{
+  "id": "snow_light",
+  "name": "雪·昼",
+  "variant": "light",
+  "author": "KKTools",
+  "tokens": {
+    "bg": "#e8eaed",
+    "bg_deep": "#d8dce1",
+    "surface": "#ffffff",
+    "surface_alt": "#eef0f3",
+    "border": "#c0c6cf",
+    "border_soft": "#d6dbe2",
+    "text": "#1b1e22",
+    "text_strong": "#0c0e11",
+    "text_muted": "#4f555d",
+    "text_dim": "#5b626b",
+    "accent": "#b5402f",
+    "selection": "#f0c9c1",
+    "primary": "#b0392a",
+    "on_primary": "#fdf6f2",
+    "danger": "#b0302a",
+    "success": "#3f6147"
+  },
+  "shape": { "radius": 6, "radius_sm": 4, "radius_lg": 10 }
+}

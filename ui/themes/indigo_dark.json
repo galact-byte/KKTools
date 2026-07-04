@@ -1,0 +1,25 @@
+{
+  "id": "indigo_dark",
+  "name": "靛青·夜",
+  "variant": "dark",
+  "author": "KKTools",
+  "tokens": {
+    "bg": "#0d1018",
+    "bg_deep": "#080a10",
+    "surface": "#151a26",
+    "surface_alt": "#1c2230",
+    "border": "#2a3242",
+    "border_soft": "#1f2533",
+    "text": "#d6dae6",
+    "text_strong": "#eef1f8",
+    "text_muted": "#8b94a8",
+    "text_dim": "#7e8699",
+    "accent": "#4a9edb",
+    "selection": "#234a6b",
+    "primary": "#356ca0",
+    "on_primary": "#f2f7fb",
+    "danger": "#d05a4f",
+    "success": "#5a8d8a"
+  },
+  "shape": { "radius": 6, "radius_sm": 4, "radius_lg": 10 }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "seiji_dark",
+  "name": "青磁·夜",
+  "variant": "dark",
+  "author": "KKTools",
+  "tokens": {
+    "bg": "#0f1414",
+    "bg_deep": "#0a0e0e",
+    "surface": "#161d1d",
+    "surface_alt": "#1d2625",
+    "border": "#2a3534",
+    "border_soft": "#1f2827",
+    "text": "#d6e0de",
+    "text_strong": "#eef4f2",
+    "text_muted": "#8ba09c",
+    "text_dim": "#7d918d",
+    "accent": "#5fb0a0",
+    "selection": "#245049",
+    "primary": "#316c5e",
+    "on_primary": "#f0f8f5",
+    "danger": "#cf6a5a",
+    "success": "#5fb0a0"
+  },
+  "shape": { "radius": 6, "radius_sm": 4, "radius_lg": 10 }
+}

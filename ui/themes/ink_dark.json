@@ -1,0 +1,25 @@
+{
+  "id": "ink_dark",
+  "name": "墨色·夜",
+  "variant": "dark",
+  "author": "KKTools",
+  "tokens": {
+    "bg": "#101216",
+    "bg_deep": "#0a0c0f",
+    "surface": "#181b21",
+    "surface_alt": "#1f232b",
+    "border": "#2b303a",
+    "border_soft": "#21252d",
+    "text": "#d9d6ce",
+    "text_strong": "#f1eee7",
+    "text_muted": "#9a958b",
+    "text_dim": "#8c867a",
+    "accent": "#c0392b",
+    "selection": "#7a2d22",
+    "primary": "#b5402f",
+    "on_primary": "#fbf3ee",
+    "danger": "#c0392b",
+    "success": "#5a7d63"
+  },
+  "shape": { "radius": 6, "radius_sm": 4, "radius_lg": 10 }
+}
