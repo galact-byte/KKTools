@@ -1,0 +1,25 @@
+{
+  "id": "ink_light",
+  "name": "宣纸·昼",
+  "variant": "light",
+  "author": "KKTools",
+  "tokens": {
+    "bg": "#e7e0d0",
+    "bg_deep": "#d8cfba",
+    "surface": "#fefcf7",
+    "surface_alt": "#f1ebdc",
+    "border": "#c3b69d",
+    "border_soft": "#d7cdb8",
+    "text": "#211e17",
+    "text_strong": "#100d08",
+    "text_muted": "#574f43",
+    "text_dim": "#615847",
+    "accent": "#b5402f",
+    "selection": "#ecc8bd",
+    "primary": "#b0392a",
+    "on_primary": "#fdf6f2",
+    "danger": "#b0302a",
+    "success": "#456348"
+  },
+  "shape": { "radius": 6, "radius_sm": 4, "radius_lg": 10 }
+}

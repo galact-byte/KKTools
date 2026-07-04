@@ -1,0 +1,25 @@
+{
+  "id": "amber_dark",
+  "name": "琥珀·夜",
+  "variant": "dark",
+  "author": "KKTools",
+  "tokens": {
+    "bg": "#16130d",
+    "bg_deep": "#0f0d08",
+    "surface": "#211c13",
+    "surface_alt": "#2a2418",
+    "border": "#3a3122",
+    "border_soft": "#292318",
+    "text": "#e7ded0",
+    "text_strong": "#f6efe2",
+    "text_muted": "#aaa08c",
+    "text_dim": "#968d79",
+    "accent": "#d99a3f",
+    "selection": "#6b4f1f",
+    "primary": "#d99a3f",
+    "on_primary": "#2a1e08",
+    "danger": "#cf6a4f",
+    "success": "#7f9a4e"
+  },
+  "shape": { "radius": 6, "radius_sm": 4, "radius_lg": 10 }
+}

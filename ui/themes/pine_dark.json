@@ -1,0 +1,25 @@
+{
+  "id": "pine_dark",
+  "name": "松烟·夜",
+  "variant": "dark",
+  "author": "KKTools",
+  "tokens": {
+    "bg": "#12130f",
+    "bg_deep": "#0c0d0a",
+    "surface": "#1a1c16",
+    "surface_alt": "#21241c",
+    "border": "#2e3227",
+    "border_soft": "#23261d",
+    "text": "#d8d6c8",
+    "text_strong": "#efede0",
+    "text_muted": "#97947f",
+    "text_dim": "#888471",
+    "accent": "#6f9e5a",
+    "selection": "#36502b",
+    "primary": "#4f7540",
+    "on_primary": "#f3f6ee",
+    "danger": "#c0563f",
+    "success": "#6f9e5a"
+  },
+  "shape": { "radius": 6, "radius_sm": 4, "radius_lg": 10 }
+}

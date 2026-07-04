@@ -1,0 +1,25 @@
+{
+  "id": "sakura_dark",
+  "name": "樱·夜",
+  "variant": "dark",
+  "author": "KKTools",
+  "tokens": {
+    "bg": "#161217",
+    "bg_deep": "#0f0c10",
+    "surface": "#211b22",
+    "surface_alt": "#2a232c",
+    "border": "#3a313c",
+    "border_soft": "#2b242d",
+    "text": "#e6dde2",
+    "text_strong": "#f6eef3",
+    "text_muted": "#a99ba6",
+    "text_dim": "#988b94",
+    "accent": "#e58aa3",
+    "selection": "#6e3447",
+    "primary": "#b34d6b",
+    "on_primary": "#fff3f6",
+    "danger": "#d05a4f",
+    "success": "#5a8d7a"
+  },
+  "shape": { "radius": 6, "radius_sm": 4, "radius_lg": 10 }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "bone_light",
+  "name": "骨白·昼",
+  "variant": "light",
+  "author": "KKTools",
+  "tokens": {
+    "bg": "#e8e2da",
+    "bg_deep": "#dbd4c7",
+    "surface": "#fdfbf7",
+    "surface_alt": "#f0ebe2",
+    "border": "#cbc0b2",
+    "border_soft": "#ddd4c6",
+    "text": "#1d1b1a",
+    "text_strong": "#0e0d0c",
+    "text_muted": "#595450",
+    "text_dim": "#635d56",
+    "accent": "#b5403f",
+    "selection": "#e8c8c4",
+    "primary": "#a0302f",
+    "on_primary": "#fbf4f2",
+    "danger": "#b0392a",
+    "success": "#4a8a5e"
+  },
+  "shape": { "radius": 6, "radius_sm": 4, "radius_lg": 10 }
+}

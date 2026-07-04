@@ -1,0 +1,5 @@
+PyQt6>=6.5
+msgpack>=1.0
+Pillow>=10.0
+pyzipper>=0.3
+Send2Trash>=1.8
