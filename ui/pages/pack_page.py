@@ -20,13 +20,25 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QRadioButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from core import settings, stego
 from ui.applog import log
-from ui.widgets import PageBase, hint, make_card, section_title
+from core.diagnostics import logger
+from ui.widgets import (
+    FORM_LABEL_W,
+    PageBase,
+    field_label,
+    hint,
+    indent_row,
+    install_empty_hint,
+    make_card,
+    section_title,
+)
 from ui.worker import Worker
 
 
@@ -58,7 +70,12 @@ class PackPage(PageBase):
         cols = QHBoxLayout()
         cols.setSpacing(14)
         cols.addWidget(self._build_unpack(), 1)
-        cols.addWidget(self._build_pack(), 1)
+        self.pack_scroll = QScrollArea()
+        self.pack_scroll.setWidgetResizable(True)
+        self.pack_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.pack_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.pack_scroll.setWidget(self._build_pack())
+        cols.addWidget(self.pack_scroll, 1)
         self.body_layout.addLayout(cols, 1)
 
         self.progress = QProgressBar()
@@ -71,9 +88,11 @@ class PackPage(PageBase):
         card = make_card()
         v = QVBoxLayout(card)
         v.setContentsMargins(14, 14, 14, 14)
+        v.setSpacing(8)
         v.addWidget(section_title("解包"))
         v.addWidget(hint("拖入或选择压缩包 / 伪装文件（视频后接 zip 也能识别），解压到输出目录。"))
         self.unpack_list = _DropList()
+        install_empty_hint(self.unpack_list, "把压缩包或伪装文件拖到这里，或点击下方「选择文件」")
         v.addWidget(self.unpack_list, 1)
         row = QHBoxLayout()
         b_add = QPushButton("选择文件"); b_add.clicked.connect(self._add_unpack)
@@ -85,18 +104,16 @@ class PackPage(PageBase):
         self.unpack_out.setPlaceholderText("解包输出目录")
         b_out = QPushButton("…"); b_out.setObjectName("MiniBtn"); b_out.setFixedWidth(34)
         b_out.clicked.connect(lambda: self._pick_dir(self.unpack_out))
-        out.addWidget(QLabel("输出")); out.addWidget(self.unpack_out, 1); out.addWidget(b_out)
+        out.addWidget(field_label("输出目录", FORM_LABEL_W)); out.addWidget(self.unpack_out, 1); out.addWidget(b_out)
         v.addLayout(out)
-        opt = QHBoxLayout()
-        self.opt_del_src = QCheckBox("解包成功后删除源文件")
-        self.opt_clear_queue = QCheckBox("解压完清空队列")
-        opt.addWidget(self.opt_del_src); opt.addWidget(self.opt_clear_queue); opt.addStretch(1)
-        v.addLayout(opt)
         pw_row = QHBoxLayout()
         self.unpack_pwds = QLineEdit()
-        self.unpack_pwds.setPlaceholderText("解密密码（加密包用，多个用逗号分隔；不加密可留空）")
-        pw_row.addWidget(QLabel("密码")); pw_row.addWidget(self.unpack_pwds, 1)
+        self.unpack_pwds.setPlaceholderText("加密包才需要；多个密码用逗号分隔")
+        pw_row.addWidget(field_label("解密密码", FORM_LABEL_W)); pw_row.addWidget(self.unpack_pwds, 1)
         v.addLayout(pw_row)
+        self.opt_del_src = QCheckBox("解包成功后删除源文件")
+        self.opt_clear_queue = QCheckBox("解压完清空队列")
+        v.addLayout(indent_row(self.opt_del_src, self.opt_clear_queue))
         b_go = QPushButton("开始解包"); b_go.setProperty("accent", "primary")
         b_go.clicked.connect(self._do_unpack)
         v.addWidget(b_go)
@@ -144,6 +161,7 @@ class PackPage(PageBase):
                         continue
                     names = stego.extract_archive(f, sub, passwords=pwds)
                 except Exception as exc:  # noqa: BLE001
+                    logger.exception("解包失败: %s", Path(f).name)
                     results.append(f"[X] {Path(f).name}: {exc}（可能需要正确密码）")
                     continue
                 results.append(f"[OK] {Path(f).name} -> {len(names)} 个文件")
@@ -171,19 +189,68 @@ class PackPage(PageBase):
         card = make_card()
         v = QVBoxLayout(card)
         v.setContentsMargins(14, 14, 14, 14)
+        v.setSpacing(8)
         v.addWidget(section_title("打包并伪装"))
-        v.addWidget(hint("把文件夹压缩后追加到一个真实视频/图片之后，生成既能播放又能解压的伪装文件。"))
+        v.addWidget(hint("把文件夹或指定文件压缩后追加到真实视频/图片之后，生成既能播放又能解压的伪装文件。"))
 
-        self.pack_folder = self._path_row(v, "待打包文件夹", pick_dir=True)
-        self.pack_carrier = self._path_row(v, "载体文件(视频/图片)", pick_dir=False)
+        modes = QWidget()
+        mode_row = QHBoxLayout(modes)
+        mode_row.setContentsMargins(0, 0, 0, 0)
+        mode_row.setSpacing(8)
+        mode_row.addWidget(field_label("打包来源", FORM_LABEL_W))
+        self.pack_by_folder = QRadioButton("整个文件夹", modes)
+        self.pack_by_files = QRadioButton("指定文件", modes)
+        self.pack_by_folder.setChecked(True)
+        mode_row.addWidget(self.pack_by_folder)
+        mode_row.addWidget(self.pack_by_files)
+        mode_row.addStretch(1)
+        v.addWidget(modes)
+
+        self.folder_source = QWidget()
+        folder_layout = QVBoxLayout(self.folder_source)
+        folder_layout.setContentsMargins(0, 0, 0, 0); folder_layout.setSpacing(8)
+        self.pack_folder = self._path_row(folder_layout, "待打包文件夹", pick_dir=True)
+        v.addWidget(self.folder_source)
+
+        self.file_source = QWidget()
+        file_layout = QVBoxLayout(self.file_source)
+        file_layout.setContentsMargins(0, 0, 0, 0); file_layout.setSpacing(8)
+        self.pack_file_list = QListWidget()
+        install_empty_hint(self.pack_file_list, "点击「添加文件」选择要打包的 Mod")
+        self.pack_file_list.setFixedHeight(100)
+        self.pack_file_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.pack_file_list.setToolTip("包内仅包含列表中的文件；同名文件不能同时打包")
+        list_row = QHBoxLayout()
+        list_label = field_label("已选文件", FORM_LABEL_W)
+        list_row.addWidget(list_label, 0, Qt.AlignmentFlag.AlignTop)
+        list_row.addWidget(self.pack_file_list, 1)
+        file_layout.addLayout(list_row)
+        file_row = QHBoxLayout()
+        file_row.addWidget(field_label("", FORM_LABEL_W))
+        b_add_files = QPushButton("添加文件")
+        b_add_files.clicked.connect(self._add_pack_files)
+        b_remove_files = QPushButton("移除所选")
+        b_remove_files.clicked.connect(self._remove_pack_files)
+        self.pack_file_count = QLabel("已选择 0 个文件")
+        file_row.addWidget(b_add_files)
+        file_row.addWidget(b_remove_files)
+        file_row.addWidget(self.pack_file_count)
+        file_row.addStretch(1)
+        file_layout.addLayout(file_row)
+        v.addWidget(self.file_source)
+        self.pack_by_folder.toggled.connect(self._on_pack_source_changed)
+        self._on_pack_source_changed(True)
+
+        self.pack_carrier = self._path_row(v, "载体文件", pick_dir=False)
+        self.pack_carrier.setPlaceholderText("真实的视频或图片，打包结果仍可正常播放/查看")
 
         # [高级] 素材池：从一个目录里随机抽载体，每次伪装外壳都不同、更隐蔽
         self.adv_pool = QWidget()
         pv = QVBoxLayout(self.adv_pool); pv.setContentsMargins(0, 0, 0, 0); pv.setSpacing(8)
         self.use_pool = QCheckBox("改用素材池：从目录随机抽一个载体")
         self.use_pool.toggled.connect(self._on_pool_toggled)
-        pv.addWidget(self.use_pool)
-        self.pool_dir = self._path_row(pv, "载体素材池目录", pick_dir=True)
+        pv.addLayout(indent_row(self.use_pool))
+        self.pool_dir = self._path_row(pv, "素材池目录", pick_dir=True)
         self.pool_dir.setEnabled(False)
         v.addWidget(self.adv_pool)
 
@@ -192,17 +259,21 @@ class PackPage(PageBase):
 
         # [高级] 分卷
         self.adv_split = QWidget()
-        sv = QHBoxLayout(self.adv_split); sv.setContentsMargins(0, 0, 0, 0)
-        sv.addWidget(QLabel("分卷大小(MB，0=不分卷)"))
+        sv = QHBoxLayout(self.adv_split); sv.setContentsMargins(0, 0, 0, 0); sv.setSpacing(8)
+        sv.addWidget(field_label("分卷大小", FORM_LABEL_W))
         self.split_size = QDoubleSpinBox()
         self.split_size.setRange(0, 100000); self.split_size.setValue(0); self.split_size.setDecimals(0)
+        self.split_size.setSuffix(" MB"); self.split_size.setSpecialValueText("不分卷")
+        self.split_size.setMinimumWidth(120)
         sv.addWidget(self.split_size); sv.addStretch(1)
         v.addWidget(self.adv_split)
 
         # 单层密码加密（常用，普通模式也显示）
         enc_row = QHBoxLayout()
-        self.enc_enable = QCheckBox("启用密码加密(AES-256)")
-        self.enc_pwd = QLineEdit(); self.enc_pwd.setPlaceholderText("加密密码")
+        self.enc_enable = QCheckBox("密码加密")
+        self.enc_enable.setFixedWidth(FORM_LABEL_W)
+        self.enc_enable.setToolTip("使用 AES-256 加密压缩包")
+        self.enc_pwd = QLineEdit(); self.enc_pwd.setPlaceholderText("勾选左侧后填写（AES-256）")
         self.enc_pwd.setEchoMode(QLineEdit.EchoMode.Password)
         enc_row.addWidget(self.enc_enable); enc_row.addWidget(self.enc_pwd, 1)
         v.addLayout(enc_row)
@@ -214,22 +285,26 @@ class PackPage(PageBase):
         av.addWidget(hint("封缄 = 用多个密码层层加密，层数越多越难破解；解封需按相同顺序提供全部密码。"
                           "层数 1 时走普通加密。"))
         seal_row = QHBoxLayout()
-        seal_row.addWidget(QLabel("封缄层数"))
+        seal_row.addWidget(field_label("封缄层数", FORM_LABEL_W))
         self.seal_layers = QDoubleSpinBox()
         self.seal_layers.setRange(1, 5); self.seal_layers.setValue(1); self.seal_layers.setDecimals(0)
+        self.seal_layers.setMinimumWidth(120)
         self.seal_layers.valueChanged.connect(self._on_layers_changed)
         seal_row.addWidget(self.seal_layers); seal_row.addStretch(1)
         av.addLayout(seal_row)
         self.seal_pwds = QLineEdit()
-        self.seal_pwds.setPlaceholderText("各层密码，从内到外，用逗号分隔（层数≥2 时必填）")
+        self.seal_pwds.setPlaceholderText("从内到外，用逗号分隔；层数 ≥ 2 时必填")
         self.seal_pwds.setEnabled(False)
-        av.addWidget(self.seal_pwds)
+        seal_pwd_row = QHBoxLayout()
+        seal_pwd_row.addWidget(field_label("各层密码", FORM_LABEL_W))
+        seal_pwd_row.addWidget(self.seal_pwds, 1)
+        av.addLayout(seal_pwd_row)
         self.rec_enable = QCheckBox("生成恢复校验清单(.kkrec.json)，可检测文件损坏")
         self.rec_redundancy = QCheckBox("额外保存尾部冗余（便于修补中央目录损坏）")
         self.rec_redundancy.setEnabled(False)
         self.rec_enable.toggled.connect(self.rec_redundancy.setEnabled)
-        av.addWidget(self.rec_enable)
-        av.addWidget(self.rec_redundancy)
+        av.addLayout(indent_row(self.rec_enable))
+        av.addLayout(indent_row(self.rec_redundancy))
         v.addWidget(self.adv_seal)
 
         b_go = QPushButton("开始打包伪装"); b_go.setProperty("accent", "primary")
@@ -279,17 +354,49 @@ class PackPage(PageBase):
                 edit.setText(d)
 
         b.clicked.connect(pick)
-        row.addWidget(QLabel(label))
+        row.addWidget(field_label(label, FORM_LABEL_W))
         row.addWidget(edit, 1)
         row.addWidget(b)
         parent.addLayout(row)
         return edit
 
+    def _on_pack_source_changed(self, by_folder: bool) -> None:
+        self.folder_source.setVisible(by_folder)
+        self.file_source.setVisible(not by_folder)
+
+    def _add_pack_files(self) -> None:
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "选择要打包的 Mod 文件", "", "Mod 文件 (*.zipmod *.zip);;所有文件 (*.*)"
+        )
+        existing = {self.pack_file_list.item(i).text().casefold()
+                    for i in range(self.pack_file_list.count())}
+        for path in files:
+            if path.casefold() not in existing:
+                self.pack_file_list.addItem(path)
+                existing.add(path.casefold())
+        self.pack_file_count.setText(f"已选择 {self.pack_file_list.count()} 个文件")
+
+    def _remove_pack_files(self) -> None:
+        for item in self.pack_file_list.selectedItems():
+            self.pack_file_list.takeItem(self.pack_file_list.row(item))
+        self.pack_file_count.setText(f"已选择 {self.pack_file_list.count()} 个文件")
+
     def _do_pack(self) -> None:
-        folder = self.pack_folder.text().strip()
+        if self.pack_by_files.isChecked():
+            source = [self.pack_file_list.item(i).text()
+                      for i in range(self.pack_file_list.count())]
+            if not source:
+                QMessageBox.warning(self, "无效", "请先添加要打包的文件。")
+                return
+            if any(not Path(path).is_file() for path in source):
+                QMessageBox.warning(self, "无效", "所选文件已不存在，请检查文件列表。")
+                return
+        else:
+            source = self.pack_folder.text().strip()
+            if not (source and Path(source).is_dir()):
+                QMessageBox.warning(self, "无效", "请选择有效的待打包文件夹。")
+                return
         out = self.pack_out.text().strip()
-        if not (folder and Path(folder).is_dir()):
-            QMessageBox.warning(self, "无效", "请选择有效的待打包文件夹。"); return
 
         use_pool = self.use_pool.isChecked()
         carrier = self.pack_carrier.text().strip()
@@ -327,10 +434,10 @@ class PackPage(PageBase):
             else:
                 msgs_prefix = []
             if seal_pwds:
-                stego.pack_layered(folder, out, seal_pwds, carrier=carrier_use, progress=progress)
+                stego.pack_layered(source, out, seal_pwds, carrier=carrier_use, progress=progress)
                 msgs = msgs_prefix + [f"[OK] 已多重封缄({len(seal_pwds)}层)并伪装: {Path(out).name}"]
             else:
-                stego.pack_and_disguise(folder, carrier_use, out, password=password, progress=progress)
+                stego.pack_and_disguise(source, carrier_use, out, password=password, progress=progress)
                 msgs = msgs_prefix + [f"[OK] 已伪装{'(AES加密)' if password else ''}: {Path(out).name}"]
             if gen_rec:
                 sc = stego.write_recovery_sidecar(out, redundancy=redundancy)

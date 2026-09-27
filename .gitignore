@@ -35,3 +35,6 @@ mod_index.json
 .vscode/
 
 examples_pic/
+
+# 构建时自动生成的版本信息
+core/build_info.json

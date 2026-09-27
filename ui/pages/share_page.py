@@ -9,7 +9,6 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -21,8 +20,20 @@ from PyQt6.QtWidgets import (
 )
 
 from core import identity, manifest, mod_index, settings, share
+from core.diagnostics import logger
 from ui.applog import log
-from ui.widgets import CardDropList, PageBase, hint, make_card, make_dir_row, section_title
+from ui.widgets import (
+    CardDropList,
+    PageBase,
+    FORM_LABEL_W,
+    field_label,
+    hint,
+    indent_row,
+    install_empty_hint,
+    make_card,
+    make_dir_row,
+    section_title,
+)
 from ui.worker import Worker
 
 _INDEX_CACHE = settings.app_dir() / "mod_index.json"
@@ -53,6 +64,7 @@ class SharePage(PageBase):
         v.addWidget(section_title("生成分享包"))
         v.addWidget(hint("依赖的 mod 取自 Mod 仓库索引；缺失的会记录在分享包的 README。请先在「Mod 仓库」建好索引。"))
         self.queue = CardDropList()
+        install_empty_hint(self.queue, "把角色卡 PNG 拖到这里，或点击下方「加入角色卡」")
         v.addWidget(self.queue, 1)
         row = QHBoxLayout()
         b_add = QPushButton("加入角色卡"); b_add.clicked.connect(self._add)
@@ -62,18 +74,19 @@ class SharePage(PageBase):
         _d, self.out_edit = make_dir_row("输出目录", settings.get("output_dir", "") or "", parent=self)
         v.addLayout(_d)
         self.chk_group = QCheckBox("按角色分组（每张卡一个子目录）"); self.chk_group.setChecked(True)
-        v.addWidget(self.chk_group)
+        v.addLayout(indent_row(self.chk_group))
 
         # 排除参考清单（大整合）里已有的 mod，避免分享包塞入对方多半已有的 mod
         self.chk_exclude = QCheckBox("排除参考清单中已有的 mod（如大整合包，减小体积）")
         self.chk_exclude.toggled.connect(lambda on: self.exclude_row.setEnabled(on))
-        v.addWidget(self.chk_exclude)
+        v.addLayout(indent_row(self.chk_exclude))
         erow = QHBoxLayout()
+        erow.setContentsMargins(0, 0, 0, 0)
         self.exclude_edit = QLineEdit()
         self.exclude_edit.setPlaceholderText("参考清单文件（.json 清单或每行一个 GUID 的 .txt）")
         b_pick = QPushButton("…"); b_pick.setObjectName("MiniBtn"); b_pick.setFixedWidth(34)
         b_pick.clicked.connect(self._pick_exclude_list)
-        erow.addWidget(QLabel("参考清单")); erow.addWidget(self.exclude_edit, 1); erow.addWidget(b_pick)
+        erow.addWidget(field_label("参考清单", FORM_LABEL_W)); erow.addWidget(self.exclude_edit, 1); erow.addWidget(b_pick)
         self.exclude_row = QWidget(); self.exclude_row.setLayout(erow); self.exclude_row.setEnabled(False)
         v.addWidget(self.exclude_row)
 
@@ -81,6 +94,7 @@ class SharePage(PageBase):
         b_go.clicked.connect(self._build)
         v.addWidget(b_go)
         self.result = QPlainTextEdit(); self.result.setReadOnly(True); self.result.setMaximumHeight(140)
+        self.result.setPlaceholderText("生成结果会显示在这里")
         v.addWidget(self.result)
         return card
 
@@ -121,6 +135,7 @@ class SharePage(PageBase):
             try:
                 exclude_guids = set(manifest.load_manifest(ref).get("guids", []))
             except OSError as exc:
+                logger.exception("读取参考清单失败")
                 QMessageBox.critical(self, "读取失败", f"无法读取参考清单：{exc}"); return
             if not exclude_guids:
                 QMessageBox.warning(self, "参考清单为空", "参考清单里没有解析到任何 GUID。"); return
@@ -156,11 +171,13 @@ class SharePage(PageBase):
         v.addWidget(hint("从分享包(或任意含卡片/zipmod 的目录)把卡片复制回游戏角色目录、mod 复制回游戏 mods 目录。已存在同名则跳过。"))
         _d, self.rs_pkg = make_dir_row("分享包目录", parent=self); v.addLayout(_d)
         _d, self.rs_card = make_dir_row("卡片目标目录", parent=self); v.addLayout(_d)
-        _d, self.rs_mod = make_dir_row("Mod 目标目录(可空)", parent=self); v.addLayout(_d)
+        _d, self.rs_mod = make_dir_row("Mod 目标目录", parent=self); v.addLayout(_d)
+        self.rs_mod.setPlaceholderText("可留空：只导入卡片")
         b = QPushButton("开始导入 / 恢复"); b.setProperty("accent", "primary")
         b.clicked.connect(self._do_restore)
         v.addWidget(b)
         self.rs_result = QPlainTextEdit(); self.rs_result.setReadOnly(True); self.rs_result.setMaximumHeight(120)
+        self.rs_result.setPlaceholderText("导入结果会显示在这里")
         v.addWidget(self.rs_result)
         v.addStretch(1)
         return card
@@ -200,12 +217,13 @@ class SharePage(PageBase):
         opt = QHBoxLayout()
         self.or_by = QComboBox(); self.or_by.addItem("按类型", "type"); self.or_by.addItem("按角色名", "character")
         self.or_move = QCheckBox("移动(而非复制)")
-        opt.addWidget(QLabel("方式")); opt.addWidget(self.or_by); opt.addWidget(self.or_move); opt.addStretch(1)
+        opt.addWidget(field_label("整理方式", FORM_LABEL_W)); opt.addWidget(self.or_by); opt.addWidget(self.or_move); opt.addStretch(1)
         v.addLayout(opt)
         b = QPushButton("开始整理"); b.setProperty("accent", "primary")
         b.clicked.connect(self._do_organize)
         v.addWidget(b)
         self.or_result = QPlainTextEdit(); self.or_result.setReadOnly(True); self.or_result.setMaximumHeight(100)
+        self.or_result.setPlaceholderText("整理结果会显示在这里")
         v.addWidget(self.or_result)
         v.addStretch(1)
         return card
@@ -264,6 +282,7 @@ class SharePage(PageBase):
         self._peer_mine_only: list[str] = []  # 上次对账得到的“我可补给对方”的 guid
 
         self.rc_result = QPlainTextEdit(); self.rc_result.setReadOnly(True)
+        self.rc_result.setPlaceholderText("对账结果会显示在这里")
         v.addWidget(self.rc_result, 1)
         return card
 
@@ -293,6 +312,7 @@ class SharePage(PageBase):
         try:
             theirs = manifest.load_manifest(path)
         except OSError as exc:
+            logger.exception("读取清单失败")
             QMessageBox.critical(self, "读取失败", f"无法读取清单：{exc}"); return
         mine = manifest.build_manifest(index, identity.get_identity())
         rec = manifest.reconcile_manifests(mine, theirs)

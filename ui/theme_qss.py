@@ -25,17 +25,28 @@ _CHEVRON_SVG = (
 )
 
 
+_CHECK_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+    '<path d="M3.5 8.2 L6.6 11.2 L12.5 4.8" fill="none" stroke="{color}" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+)
+
+
 def template_text() -> str:
     return _TEMPLATE_PATH.read_text(encoding="utf-8")
 
 
-def _chevron_url(color: str) -> str:
-    """按颜色生成（缓存）一个向下箭头 SVG，返回 QSS url() 用的正斜杠绝对路径。"""
+def _svg_url(name: str, svg: str, color: str) -> str:
+    """按颜色生成（缓存）一个 SVG 图标，返回 QSS url() 用的正斜杠绝对路径。"""
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = _CACHE_DIR / f"chevron_{color.lstrip('#')}.svg"
+    path = _CACHE_DIR / f"{name}_{color.lstrip('#')}.svg"
     if not path.exists():
-        path.write_text(_CHEVRON_SVG.format(color=color), encoding="utf-8")
+        path.write_text(svg.format(color=color), encoding="utf-8")
     return path.as_posix()
+
+
+def _chevron_url(color: str) -> str:
+    return _svg_url("chevron", _CHEVRON_SVG, color)
 
 
 def build_qss(theme: Theme) -> str:
@@ -46,4 +57,5 @@ def build_qss(theme: Theme) -> str:
     """
     values = theme.flat()
     values["arrow_icon"] = _chevron_url(values["text_muted"])
+    values["check_icon"] = _svg_url("check", _CHECK_SVG, values["on_primary"])
     return Template(template_text()).substitute(values)

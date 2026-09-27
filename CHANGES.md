@@ -1,5 +1,36 @@
 # 修改记录 — KKTools 恋活角色卡工具箱
 
+## 2026-09-27 — v0.6.0 选择性打包、反馈分类、诊断日志与界面调整
+
+### 背景与目标
+- 打包支持只选择部分文件，默认保留整个文件夹模式；普通、AES 与多层封缄共用输入校验。
+- 区分 Bug 和功能建议；无控制台 EXE 自动保存操作记录及异常，方便用户提供排错材料。
+
+### 影响与兼容性
+- 不修改原 Mod；新日志写入用户本地目录，失败时回退系统临时目录。每次运行独立记录，保留最近十次运行并轮转。
+- 发布前维护根目录 `RELEASE_NOTES.md`，标签工作流直接用其正文发布。缺少发布说明会使标签构建失败。
+- 不涉及存档、配置迁移。撤回本次相关源码即可恢复旧行为，已生成日志不影响旧版。
+
+### 文件与实现
+| 操作 | 路径 | 说明 |
+|---|---|---|
+| 修改 | `core/stego.py`、`ui/pages/pack_page.py` | 指定文件模式、输入和输出防覆盖校验、打包区滚动；修复封缄伴随文件覆盖输入及载体缺失时清空输出的问题 |
+| 新增/修改 | `core/diagnostics.py`、`main.py`、`ui/applog.py`、`ui/worker.py` | 运行日志落盘、构建信息、后台及未捕获异常堆栈 |
+| 修改 | `ui/pages/log_page.py` 及编辑/场景/分享/Mod 页面 | 打开日志目录；已处理的操作错误也保存诊断信息 |
+| 新增/修改 | `.github/ISSUE_TEMPLATE/`、`.github/workflows/build.yml` | 两类 Issue 表单及标准标签，构建前测试、嵌入版本信息、读取人工发布说明 |
+| 新增/修改 | `tests/test_pack_selection.py`、`tests/test_pack_page.py`、`tests/test_diagnostics.py`、`tests/manual_pack_smoke.py` | 选择性打包、界面、日志及真实文件只读验收 |
+| 新增/修改 | `README.md`、`RELEASE_NOTES.md`、`.gitignore` | 反馈方法、发布维护流程和生成文件忽略规则 |
+| 修改 | `ui/style.qss.tmpl`、`ui/theme_qss.py`、`ui/widgets.py` | 复选框对勾、禁用危险按钮样式、卡片内透明底、统一字段名列宽、空状态提示 |
+| 修改 | `ui/pages/*.py` | 各页表单对齐、空列表提示、编辑页工具栏分组与「更多」菜单、生日行对齐、Mod 检查区分栏标题 |
+| 新增/修改 | `tests/test_ui_polish.py`、`tests/test_manifest.py` | 界面细节回归；修复配置路径测试后未还原的问题 |
+
+### 验证
+- `python -m pytest -q`：54 项通过；覆盖选择性打包、多层封缄、防覆盖、日志轮转、不可写目录回退、后台/未捕获/弹窗处理异常、无标准输出运行及日志页按钮。
+- `.github` 下四个 YAML 文件解析及 Release 正文引用校验通过；远程仓库已存在 `bug`、`enhancement` 标签。
+- 浅色、深色主题下 8 个页面实窗截图核对：对勾、对齐、空状态提示与工具栏分组显示正常。
+- 本机 PyInstaller 无控制台 EXE 构建、启动、写入带 `frozen=True` 的运行日志及正常退出通过。
+- 恋活 1/2 真实 Mod 的文件级往返已在前序验收完成，原文件哈希、大小与修改时间未变。
+
 > **修订记录**
 >
 > - v0.5.5: **仓库独立 + GitHub Actions 自动构建**。①从父仓库 `E:/Python/Programs/test` 独立为单独 git 仓库，父仓库 `.gitignore` 添加 `bat/game/KK/` 排除规则；②新增 `.github/workflows/build.yml`：Windows PyInstaller 单文件构建，tag push 自动发布 Release；③全面真卡验证通过——KK1 代 8 张/2 代 KKS 3 张女卡全部字节级往返一致，KKS 4 张男卡一致，KK1/KKS 参数编辑（外科手术写回）正常，场景卡提取正常（KK1 6 角色/KKS 1 角色），24/24 单测 + 10 主题 WCAG 对比度全绿。

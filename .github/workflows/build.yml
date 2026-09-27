@@ -5,6 +5,8 @@ on:
     branches: [master]
     tags:
       - 'v*'
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -27,7 +29,31 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller pytest
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: Write build metadata
+        shell: python
+        run: |
+          import json, os
+          from pathlib import Path
+          Path("core/build_info.json").write_text(json.dumps({
+              "version": os.environ["GITHUB_REF_NAME"],
+              "commit": os.environ["GITHUB_SHA"],
+          }), encoding="utf-8")
+
+      - name: Check release notes (on tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $notes = "RELEASE_NOTES.md"
+          if (!(Test-Path $notes) -or !(Get-Content $notes -Raw).Trim()) {
+            throw "请先编写本次版本的发布说明：$notes"
+          }
 
       - name: Build with PyInstaller
         run: |
@@ -35,6 +61,7 @@ jobs:
             --add-data "ui/themes;ui/themes" `
             --add-data "ui/icons;ui/icons" `
             --add-data "ui/style.qss.tmpl;ui" `
+            --add-data "core/build_info.json;core" `
             --clean `
             main.py
 
@@ -49,4 +76,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/KKTools.exe
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md

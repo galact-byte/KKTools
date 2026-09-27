@@ -35,7 +35,7 @@ from PyQt6.QtWidgets import (
 from core import card_scan, settings
 from core.card_scan import TYPE_LABELS, CardItem
 from ui.applog import log
-from ui.widgets import PageBase, make_card
+from ui.widgets import PageBase, install_empty_hint, make_card
 from ui.worker import Worker
 
 ROLE_ITEM = Qt.ItemDataRole.UserRole
@@ -114,6 +114,7 @@ class BrowserPage(PageBase):
         self.grid.setIconSize(QSize(120, 135))
         self.grid.setGridSize(QSize(146, 188))
         self.grid.setResizeMode(QListWidget.ResizeMode.Adjust)
+        install_empty_hint(self.grid, "选择目录后点击「扫描」，卡片缩略图会显示在这里")
         self.grid.setMovement(QListWidget.Movement.Static)
         self.grid.setSpacing(6)
         self.grid.setWordWrap(True)
@@ -146,11 +147,13 @@ class BrowserPage(PageBase):
         self.stats_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         v.addWidget(self.stats_label)
 
+        v.addSpacing(12)
         tree_head = QLabel("文件夹")
         tree_head.setObjectName("SectionTitle")
         v.addWidget(tree_head)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
+        install_empty_hint(self.tree, "扫描后显示文件夹")
         self.tree.itemSelectionChanged.connect(self._on_tree_select)
         v.addWidget(self.tree, 1)
 

@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core import scene_card
+from core.diagnostics import logger
 from core.scene_card import get_scene_preview
 from ui.applog import log
 from ui.widgets import PageBase, hint, make_card, section_title
@@ -52,6 +53,7 @@ class ScenePage(PageBase):
         rv.addWidget(section_title("分析结果"))
         rv.addWidget(hint("提取的角色以脸图作封面，重建为可独立读取的标准角色卡。"))
         self.analysis = QPlainTextEdit(); self.analysis.setReadOnly(True)
+        self.analysis.setPlaceholderText("选择场景卡后点击「分析」，结果会显示在这里")
         rv.addWidget(self.analysis, 1)
         row = QHBoxLayout()
         self.b_analyze = QPushButton("分析"); self.b_analyze.clicked.connect(self._analyze); self.b_analyze.setEnabled(False)
@@ -85,6 +87,7 @@ class ScenePage(PageBase):
         try:
             info = scene_card.analyze_scene(self._scene_path)
         except Exception as exc:  # noqa: BLE001
+            logger.exception("分析场景卡失败")
             QMessageBox.critical(self, "分析失败", str(exc)); return
         lines = [
             f"文件: {Path(info['path']).name}",
@@ -112,6 +115,7 @@ class ScenePage(PageBase):
         try:
             saved = scene_card.extract_characters_to(self._scene_path, out)
         except Exception as exc:  # noqa: BLE001
+            logger.exception("提取场景角色失败")
             QMessageBox.critical(self, "提取失败", str(exc)); return
         log(f"从场景卡提取 {len(saved)} 个角色到 {out}")
         if saved:

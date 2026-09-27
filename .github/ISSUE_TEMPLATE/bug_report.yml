@@ -1,0 +1,52 @@
+name: Bug 反馈
+description: 软件报错、崩溃或实际结果不符合预期
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请描述一个可复现的问题；新增功能请使用「功能建议」。
+        日志入口：软件「运行日志 → 打开日志目录」，上传最近的 `.log` 文件（可直接拖入下方文本框）。
+        软件打不开时，在资源管理器地址栏输入 `%LOCALAPPDATA%\KKTools\logs`；若该位置无法写入，备用目录为 `%TEMP%\KKTools\logs`。
+        日志可能包含本机用户名、文件名和路径，上传前可遮盖不想公开的信息；不要提供加密密码。
+  - type: input
+    id: version
+    attributes:
+      label: 软件版本与运行方式
+      description: 下载版本号或 Actions 构建编号；使用 EXE 还是源码启动。
+      placeholder: "例如：v1.x，KKTools.exe"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 系统与游戏
+      placeholder: "例如：Windows 11；恋活 1 / 恋活日光浴 / 与游戏无关"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 从哪个页面开始，点击了什么，使用了什么类型的文件？
+      placeholder: |
+        1. 打开……
+        2. 选择……
+        3. 点击……后出现……
+    validations:
+      required: true
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: 预期结果与实际结果
+      placeholder: "我希望……，实际却……"
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 日志与截图
+      description: 拖入最近的 .log 文件和报错截图。日志未生成或无法获取时，请写明情况；无需上传完整游戏或 Mod 库。
+    validations:
+      required: true

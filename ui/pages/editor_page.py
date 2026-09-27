@@ -38,6 +38,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core import kk_enums, kk_fields, settings
+from core.diagnostics import logger
 from core.kk_card import KKCardError, KoikatuCard
 
 _RECENT_LIMIT = 12
@@ -75,14 +76,21 @@ class EditorPage(PageBase):
         self.btn_overwrite = QPushButton("覆盖原卡并备份")
         self.btn_overwrite.setProperty("accent", "danger")
         self.btn_diff = QPushButton("预览写回差异")
-        self.btn_convert = QPushButton("切换 KK/KKS 标识(实验)")
-        self.btn_preview = QPushButton("更换预览图")
-        self.btn_export = QPushButton("导出 JSON")
-        for b in (
-            self.btn_open, self.btn_recent, self.btn_save_as, self.btn_overwrite,
-            self.btn_diff, self.btn_convert, self.btn_preview, self.btn_export,
-        ):
-            toolbar.addWidget(b)
+        # 不常用的操作收进「更多」，工具栏只留读卡与保存相关的主流程
+        self.btn_more = QPushButton("更多")
+        self.more_menu = QMenu(self)
+        self.act_preview = self.more_menu.addAction("更换预览图")
+        self.act_export = self.more_menu.addAction("导出 JSON")
+        self.more_menu.addSeparator()
+        self.act_convert = self.more_menu.addAction("切换 KK/KKS 标识(实验)")
+        self.btn_more.setMenu(self.more_menu)
+        # 分组：读取 | 检查与保存 | 其他
+        toolbar.addWidget(self.btn_open); toolbar.addWidget(self.btn_recent)
+        toolbar.addSpacing(18)
+        toolbar.addWidget(self.btn_diff); toolbar.addWidget(self.btn_save_as)
+        toolbar.addWidget(self.btn_overwrite)
+        toolbar.addSpacing(18)
+        toolbar.addWidget(self.btn_more)
         toolbar.addStretch(1)
         self.body_layout.addLayout(toolbar)
 
@@ -90,9 +98,9 @@ class EditorPage(PageBase):
         self.btn_save_as.clicked.connect(self._save_as_new)
         self.btn_overwrite.clicked.connect(self._overwrite)
         self.btn_diff.clicked.connect(self._preview_diff)
-        self.btn_convert.clicked.connect(self._convert_game)
-        self.btn_preview.clicked.connect(self._change_preview)
-        self.btn_export.clicked.connect(self._export_json)
+        self.act_convert.triggered.connect(self._convert_game)
+        self.act_preview.triggered.connect(self._change_preview)
+        self.act_export.triggered.connect(self._export_json)
 
         main = QHBoxLayout()
         main.setSpacing(14)
@@ -104,7 +112,7 @@ class EditorPage(PageBase):
 
     def apply_ui_mode(self, mode: str) -> None:
         """普通模式隐藏实验性「切换标识」入口；高级模式显示。"""
-        self.btn_convert.setVisible(mode == "advanced")
+        self.act_convert.setVisible(mode == "advanced")
 
     def _build_left(self) -> QWidget:
         left = make_card()
@@ -156,6 +164,7 @@ class EditorPage(PageBase):
         self.sp_month = QSpinBox(); self.sp_month.setRange(0, 12)
         self.sp_day = QSpinBox(); self.sp_day.setRange(0, 31)
         birth = QHBoxLayout()
+        birth.setContentsMargins(0, 0, 0, 0)
         birth.addWidget(QLabel("月")); birth.addWidget(self.sp_month)
         birth.addSpacing(8)
         birth.addWidget(QLabel("日")); birth.addWidget(self.sp_day)
@@ -191,6 +200,9 @@ class EditorPage(PageBase):
         il.addStretch(1)
 
         scroll.setWidget(inner)
+        # 卡片内滚动区：全局 QWidget 底色会让视口在卡片上形成色块；
+        # 应用级选择器匹配不到视口，只能在视口上单独设为透明。
+        scroll.viewport().setStyleSheet("#qt_scrollarea_viewport, #qt_scrollarea_viewport > QWidget { background: transparent; }")
         ml.addWidget(scroll, 1)
         return mid
 
@@ -204,6 +216,8 @@ class EditorPage(PageBase):
         self.detail = QPlainTextEdit(); self.detail.setReadOnly(True)
         self.json_view = QPlainTextEdit(); self.json_view.setReadOnly(True)
         self.custom_view = QPlainTextEdit(); self.custom_view.setReadOnly(True)
+        for view in (self.report, self.detail, self.json_view, self.custom_view):
+            view.setPlaceholderText("读取角色卡后显示")
         tabs.addTab(self.report, "报告")
         tabs.addTab(self.detail, "卡片详情")
         tabs.addTab(self.json_view, "解析 JSON")
@@ -212,8 +226,7 @@ class EditorPage(PageBase):
         return right
 
     def _set_enabled(self, on: bool) -> None:
-        for b in (self.btn_save_as, self.btn_overwrite, self.btn_convert,
-                  self.btn_diff, self.btn_preview, self.btn_export):
+        for b in (self.btn_save_as, self.btn_overwrite, self.btn_diff, self.btn_more):
             b.setEnabled(on)
 
     # ---------- 读卡与填充 ----------
@@ -249,9 +262,11 @@ class EditorPage(PageBase):
         try:
             card = KoikatuCard.load(path)
         except KKCardError as exc:
+            logger.exception("角色卡格式无法读取")
             QMessageBox.warning(self, "读取失败", f"这不像一张角色卡：\n{exc}")
             return
         except Exception as exc:  # noqa: BLE001
+            logger.exception("读取角色卡失败")
             QMessageBox.critical(self, "读取异常", str(exc))
             return
         if card.get_block_dict("Parameter") is None:
@@ -568,6 +583,7 @@ class EditorPage(PageBase):
                 self.card.update_parameter(updates)
             return True
         except KKCardError as exc:
+            logger.exception("写入角色卡字段失败")
             QMessageBox.warning(self, "写入失败", str(exc))
             return False
 
@@ -629,6 +645,7 @@ class EditorPage(PageBase):
             QMessageBox.information(self, "已保存", f"已另存为:\n{saved}")
             self._refresh_after_save()
         except Exception as exc:  # noqa: BLE001
+            logger.exception("另存角色卡失败")
             QMessageBox.critical(self, "保存失败", str(exc))
 
     def _overwrite(self) -> None:
@@ -647,6 +664,7 @@ class EditorPage(PageBase):
             QMessageBox.information(self, "已覆盖", "已覆盖原卡，原文件备份为同名 .bak。")
             self._refresh_after_save()
         except Exception as exc:  # noqa: BLE001
+            logger.exception("覆盖角色卡失败")
             QMessageBox.critical(self, "保存失败", str(exc))
 
     def _refresh_after_save(self) -> None:
@@ -692,6 +710,7 @@ class EditorPage(PageBase):
         try:
             self.card.set_thumbnail_from_png(Path(path).read_bytes())
         except KKCardError as exc:
+            logger.exception("更换角色卡预览失败")
             QMessageBox.warning(self, "更换失败", str(exc))
             return
         self._set_thumb(self.card.thumbnail)

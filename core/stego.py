@@ -26,21 +26,46 @@ except ImportError:  # 未装则仅支持不加密打包/解包
     HAVE_PYZIPPER = False
 
 ProgressCb = Callable[[int, int, str], None]  # (当前, 总数, 描述)
+PackSource = str | Path | Iterable[str | Path]
+
+
+def _pack_members(source: PackSource, out_path: Path) -> list[tuple[Path, str]]:
+    """在创建输出文件前确定全部成员及其包内路径。"""
+    if isinstance(source, (str, Path)):
+        folder = Path(source)
+        if not folder.is_dir():
+            raise FileNotFoundError(f"待打包文件夹不存在: {folder}")
+        members = [(p, p.relative_to(folder).as_posix())
+                   for p in folder.rglob("*") if p.is_file()]
+    else:
+        members = [(Path(p), Path(p).name) for p in source]
+        if not members:
+            raise ValueError("请先选择要打包的文件")
+
+    seen: set[str] = set()
+    for path, name in members:
+        if not path.is_file():
+            raise FileNotFoundError(f"待打包文件不存在: {path}")
+        if path.resolve() == out_path.resolve():
+            raise ValueError(f"输出路径不能覆盖待打包文件: {path}")
+        if name.casefold() in seen:
+            raise ValueError(f"包内存在同名文件: {name}")
+        seen.add(name.casefold())
+    return members
 
 
 def pack_folder(
-    folder: str | Path,
+    folder: PackSource,
     out_zip: str | Path,
     *,
     compress: bool = True,
     password: str | None = None,
     progress: ProgressCb | None = None,
 ) -> str:
-    """把文件夹打包成 zip。给 password 则用 AES-256 加密（需 pyzipper）。返回输出路径。"""
-    folder = Path(folder)
+    """把文件夹或指定文件打包成 zip；给 password 则用 AES-256 加密。"""
     out_zip = Path(out_zip)
-    files = [p for p in folder.rglob("*") if p.is_file()]
-    total = len(files)
+    members = _pack_members(folder, out_zip)
+    total = len(members)
     if password:
         if not HAVE_PYZIPPER:
             raise RuntimeError("加密打包需要 pyzipper，请先安装：pip install pyzipper")
@@ -48,15 +73,15 @@ def pack_folder(
             out_zip, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES
         ) as zf:
             zf.setpassword(password.encode("utf-8"))
-            for i, p in enumerate(files, 1):
-                zf.write(p, p.relative_to(folder).as_posix())
+            for i, (p, name) in enumerate(members, 1):
+                zf.write(p, name)
                 if progress:
                     progress(i, total, p.name)
     else:
         mode = zipfile.ZIP_DEFLATED if compress else zipfile.ZIP_STORED
         with zipfile.ZipFile(out_zip, "w", mode) as zf:
-            for i, p in enumerate(files, 1):
-                zf.write(p, p.relative_to(folder).as_posix())
+            for i, (p, name) in enumerate(members, 1):
+                zf.write(p, name)
                 if progress:
                     progress(i, total, p.name)
     return str(out_zip)
@@ -87,23 +112,33 @@ def disguise(carrier: str | Path, payload_zip: str | Path, out_path: str | Path)
     carrier = Path(carrier)
     payload_zip = Path(payload_zip)
     out_path = Path(out_path)
+    if out_path.resolve() in (carrier.resolve(), payload_zip.resolve()):
+        raise ValueError("输出路径不能覆盖载体或压缩包")
+    carrier_data = carrier.read_bytes()
+    payload_data = payload_zip.read_bytes()
     with open(out_path, "wb") as out:
-        out.write(carrier.read_bytes())
-        out.write(payload_zip.read_bytes())
+        out.write(carrier_data)
+        out.write(payload_data)
     return str(out_path)
 
 
 def pack_and_disguise(
-    folder: str | Path,
+    folder: PackSource,
     carrier: str | Path,
     out_path: str | Path,
     *,
     password: str | None = None,
     progress: ProgressCb | None = None,
 ) -> str:
-    """打包文件夹并伪装成载体文件，一步到位。给 password 则 AES 加密。"""
+    """打包文件夹或指定文件并伪装成载体文件。"""
     out_path = Path(out_path)
+    if Path(carrier).resolve() == out_path.resolve():
+        raise ValueError("输出路径不能覆盖载体文件")
+    folder = list(folder) if not isinstance(folder, (str, Path)) else folder
+    _pack_members(folder, out_path)
     tmp_zip = out_path.with_suffix(out_path.suffix + ".tmp.zip")
+    if tmp_zip.exists():
+        raise FileExistsError(f"临时打包路径已存在，请更换输出文件名: {tmp_zip}")
     try:
         pack_folder(folder, tmp_zip, password=password, progress=progress)
         disguise(carrier, tmp_zip, out_path)
@@ -237,21 +272,27 @@ def _aes_zip_single(src_file: Path, out_zip: Path, password: str, arcname: str) 
 
 
 def pack_layered(
-    folder: str | Path,
+    folder: PackSource,
     out_path: str | Path,
     passwords: list[str],
     *,
     carrier: str | Path | None = None,
     progress: ProgressCb | None = None,
 ) -> str:
-    """把文件夹多重封缄为 N 层加密文件（N=len(passwords)）。
+    """把文件夹或指定文件多重封缄为 N 层加密文件（N=len(passwords)）。
 
     passwords[0] 是最内层（最先施加）、passwords[-1] 是最外层。
     给 carrier 则把最外层结果伪装追加到载体之后。
     旁写 <out>.kkseal.json 明文记录层数（不含密码）。返回最终输出路径。
     """
-    folder = Path(folder)
+    folder = list(folder) if not isinstance(folder, (str, Path)) else folder
     out_path = Path(out_path)
+    if carrier and Path(carrier).resolve() == out_path.resolve():
+        raise ValueError("输出路径不能覆盖载体文件")
+    members = _pack_members(folder, out_path)
+    sidecar = seal_sidecar_path(out_path).resolve()
+    if any(p.resolve() == sidecar for p, _ in members) or (carrier and Path(carrier).resolve() == sidecar):
+        raise ValueError("封缄伴随文件不能覆盖待打包文件或载体")
     if not passwords:
         raise ValueError("多重封缄至少需要一个密码")
     if not HAVE_PYZIPPER:

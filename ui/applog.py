@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 
+from core.diagnostics import logger
+
 from PyQt6.QtCore import QObject, pyqtSignal
 
 
@@ -15,6 +17,7 @@ class _LogBus(QObject):
         self.history: list[str] = []
 
     def log(self, text: str) -> None:
+        logger.info(text)
         line = f"[{time.strftime('%H:%M:%S')}] {text}"
         self.history.append(line)
         if len(self.history) > 2000:

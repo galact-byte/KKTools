@@ -32,7 +32,7 @@ from ui.pages.scene_page import ScenePage
 from ui.pages.settings_page import SettingsPage
 from ui.pages.share_page import SharePage
 
-APP_VERSION = "v0.5.0"
+APP_VERSION = "v0.6.0"
 
 # 导航：(短标签, 完整名/tooltip, 图标名)
 NAV = [

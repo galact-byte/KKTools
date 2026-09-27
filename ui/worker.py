@@ -6,6 +6,8 @@ from typing import Any, Callable
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from core.diagnostics import logger
+
 
 class Worker(QThread):
     """运行一个返回值的可调用对象；通过信号回报进度/结果/异常。
@@ -42,4 +44,5 @@ class Worker(QThread):
             self.finished_ok.emit(result)
         except Exception as exc:  # noqa: BLE001 - 统一上报，避免线程内崩溃无声
             import traceback
+            logger.exception("后台任务失败")
             self.failed.emit(f"{exc}\n{traceback.format_exc()}")

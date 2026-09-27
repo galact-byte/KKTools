@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
 
 from core import identity, settings, theme as theme_mod
 from ui.applog import log
-from ui.widgets import PageBase, hint, make_dir_row, section_title
+from ui.widgets import PageBase, hint, install_empty_hint, make_dir_row, section_title
 
 
 class SettingsPage(PageBase):
@@ -61,6 +61,7 @@ class SettingsPage(PageBase):
         pv.addWidget(hint("游戏目录下的 mods 会自动纳入；这里可补充其它存放 zipmod 的目录。"))
         self.mod_list = QListWidget()
         self.mod_list.setMaximumHeight(120)
+        install_empty_hint(self.mod_list, "尚未添加额外目录")
         pv.addWidget(self.mod_list)
         mrow = QHBoxLayout()
         b_add = QPushButton("添加目录"); b_add.clicked.connect(self._add_mod_dir)

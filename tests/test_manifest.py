@@ -9,9 +9,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core import settings  # noqa: E402
 
 
+_REAL_CONFIG_PATH = settings._CONFIG_PATH
+
+
 def _isolate_config(tmp: Path) -> None:
     """把 settings 的配置路径指到临时文件。"""
     settings._CONFIG_PATH = tmp / "config.json"
+
+
+def teardown_function(_fn) -> None:
+    # 临时目录用完即删，必须还原，否则后续测试会写到已删除的目录
+    settings._CONFIG_PATH = _REAL_CONFIG_PATH
 
 
 def test_identity_stable_and_generated():

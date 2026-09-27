@@ -22,7 +22,8 @@ from PyQt6.QtWidgets import (
 
 from core import mod_index, settings
 from ui.applog import log
-from ui.widgets import CardDropList, PageBase, hint, make_card, section_title
+from core.diagnostics import logger
+from ui.widgets import CardDropList, PageBase, field_label, hint, install_empty_hint, make_card, section_title
 from ui.worker import Worker
 
 _INDEX_CACHE = settings.app_dir() / "mod_index.json"
@@ -36,6 +37,13 @@ class ModPage(PageBase):
         self._build_ui()
         self._refresh_index_status()
 
+    @staticmethod
+    def _row_label(text: str) -> QLabel:
+        """按钮行的分组名：固定宽度对齐，样式与按钮明确区分。"""
+        label = field_label(text)
+        label.setFixedWidth(72)
+        return label
+
     def _build_ui(self) -> None:
         # 索引区
         idx_card = make_card()
@@ -46,6 +54,7 @@ class ModPage(PageBase):
         self.index_status.setObjectName("HintLabel")
         iv.addWidget(self.index_status)
         row = QHBoxLayout()
+        row.addWidget(self._row_label("索引管理"))
         b_build = QPushButton("建立 / 重建索引"); b_build.setProperty("accent", "primary")
         b_build.clicked.connect(self._build_index)
         b_dirs = QPushButton("配置 Mod 目录")
@@ -67,7 +76,7 @@ class ModPage(PageBase):
         b_imp_cmp.clicked.connect(self._import_compare)
         b_exp_zip = QPushButton("按清单导出压缩包")
         b_exp_zip.clicked.connect(self._export_list_zip)
-        row_share.addWidget(QLabel("清单互助"))
+        row_share.addWidget(self._row_label("清单互助"))
         row_share.addWidget(b_exp_list); row_share.addWidget(b_imp_cmp); row_share.addWidget(b_exp_zip)
         row_share.addStretch(1)
         iv.addLayout(row_share)
@@ -82,9 +91,14 @@ class ModPage(PageBase):
         cv.addWidget(hint("拖入或选择角色卡 / 场景卡 PNG，检查它们依赖的 mod 在本地索引中是否齐全。"))
         body = QHBoxLayout()
         self.queue = CardDropList()
-        body.addWidget(self.queue, 1)
+        install_empty_hint(self.queue, "把角色卡 / 场景卡 PNG 拖到这里")
         self.result = QPlainTextEdit(); self.result.setReadOnly(True)
-        body.addWidget(self.result, 2)
+        self.result.setPlaceholderText("点击「检查队列」后，缺失的 Mod 会列在这里")
+        for pane, title, stretch in ((self.queue, "待检查卡片", 1), (self.result, "检查结果", 2)):
+            col = QVBoxLayout(); col.setSpacing(6)
+            col.addWidget(field_label(title))
+            col.addWidget(pane, 1)
+            body.addLayout(col, stretch)
         cv.addLayout(body, 1)
         row2 = QHBoxLayout()
         b_add = QPushButton("加入角色卡"); b_add.clicked.connect(self._add_cards)
@@ -184,6 +198,7 @@ class ModPage(PageBase):
                 try:
                     rep = mod_index.check_card(f, index)
                 except Exception as exc:  # noqa: BLE001
+                    logger.exception("检查卡片依赖失败: %s", Path(f).name)
                     lines.append(f"[X] {Path(f).name}: {exc}")
                     if progress:
                         progress(i, total, Path(f).name)

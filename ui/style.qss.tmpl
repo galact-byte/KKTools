@@ -114,6 +114,14 @@ QFrame[card="true"] {
     padding: 1px 0 1px 9px;
     margin-bottom: 2px;
 }
+/* 区块内的文字与布局容器不继承页面底色，否则会在卡片上形成灰色色带。
+   .QWidget/.QStackedWidget 只匹配该类本身，不影响按钮、输入框等子类。 */
+QFrame[card="true"] QLabel,
+QFrame[card="true"] QCheckBox,
+QFrame[card="true"] QRadioButton,
+QFrame[card="true"] QTabBar,
+QFrame[card="true"] .QWidget,
+QFrame[card="true"] .QStackedWidget { background: transparent; }
 #HintLabel { color: ${text_dim}; font-size: 12px; }
 #FieldLabel { color: ${text_muted}; font-size: 13px; }
 
@@ -153,6 +161,9 @@ QPushButton[accent="danger"] {
     background-color: ${button_bg}; border: 1px solid ${danger}; color: ${danger};
 }
 QPushButton[accent="danger"]:hover { background-color: ${danger_bg_hover}; }
+QPushButton[accent="danger"]:disabled {
+    color: ${text_disabled}; background-color: ${surface}; border-color: ${border_soft};
+}
 QPushButton:focus { border: 1px solid ${accent}; }
 QPushButton[accent="primary"]:focus { border: 1px solid ${on_primary}; }
 QPushButton[accent="danger"]:focus { border: 1px solid ${danger}; }
@@ -205,7 +216,23 @@ QCheckBox::indicator {
     border: 1px solid ${border}; border-radius: ${radius_sm}px; background: ${input_bg};
 }
 QCheckBox::indicator:hover { border-color: ${border_focus}; }
-QCheckBox::indicator:checked { background: ${primary}; border-color: ${primary}; }
+QCheckBox::indicator:checked { background: ${primary}; border-color: ${primary}; image: url(${check_icon}); }
+QCheckBox::indicator:disabled { background: ${surface}; border-color: ${border_soft}; }
+QCheckBox::indicator:checked:disabled { background: ${primary_disabled_bg}; border-color: ${primary_disabled_bg}; }
+QCheckBox:disabled, QRadioButton:disabled { color: ${text_disabled}; }
+
+/* ---- 单选框：与复选框同一套颜色，圆形 ---- */
+QRadioButton { spacing: 8px; color: ${text}; padding: 2px 0; }
+QRadioButton::indicator {
+    width: 14px; height: 14px;
+    border: 1px solid ${border}; border-radius: 8px; background: ${input_bg};
+}
+QRadioButton::indicator:hover { border-color: ${border_focus}; }
+QRadioButton::indicator:checked {
+    border-color: ${primary};
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 ${primary}, stop:0.5 ${primary}, stop:0.6 ${input_bg}, stop:1 ${input_bg});
+}
 
 /* ---- 列表 / 网格 ---- */
 QListWidget {
