@@ -187,7 +187,7 @@ def test_windows_helper_waits_restarts_and_rolls_back_in_separate_copy(updater, 
         assert target.read_bytes() == tiny_programs["old"], "原程序未退出时不能替换"
         helper.wait(timeout=30)
         result = json.loads((root / ".kktools-update-result.json").read_text(encoding="utf-8-sig"))
-        assert result["ok"] is (not broken)
+        assert result["ok"] is (not broken), result
         assert target.read_bytes() == (tiny_programs["old"] if broken else tiny_programs["new"])
         marker = root / ("started-old.txt" if broken else "started-new.txt")
         assert marker.is_file()
