@@ -24,7 +24,14 @@ try {
         throw 'The application did not exit in time. Update cancelled.'
     }
     $file = Get-Item -LiteralPath $source
-    $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+    $stream = [IO.File]::OpenRead($source)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '')
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
     if ($file.Length -ne $plan.size -or $hash -ne $plan.sha256) {
         throw 'Downloaded program changed after verification. Update cancelled.'
     }

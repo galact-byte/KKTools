@@ -163,8 +163,8 @@ def tiny_programs(tmp_path_factory):
     return binaries
 
 
-@pytest.mark.parametrize("broken", [False, True])
-def test_windows_helper_waits_restarts_and_rolls_back_in_separate_copy(updater, tmp_path, monkeypatch, tiny_programs, broken):
+@pytest.mark.parametrize(('broken', 'hash_cmdlet_available'), [(False, True), (True, True), (False, False)], ids=['install', 'rollback', 'install_without_hash_cmdlet'])
+def test_windows_helper_waits_restarts_and_rolls_back_in_separate_copy(updater, tmp_path, monkeypatch, tiny_programs, broken, hash_cmdlet_available):
     root = tmp_path / "升级副本 & 空格"
     root.mkdir()
     target = root / "renamed tool.exe"
@@ -177,6 +177,10 @@ def test_windows_helper_waits_restarts_and_rolls_back_in_separate_copy(updater, 
     monkeypatch.setattr(updater, "_open_url", lambda request: Response(payload, request.full_url))
     artifact = updater.download_update(release, root)
     plan = updater.prepare_update(artifact, release, executable=target)
+    if not hash_cmdlet_available:
+        helper_path = plan.with_name('install.ps1')
+        missing_hash_setup = "Import-Module (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Management')\nImport-Module (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Utility')\nRemove-Item Function:\\Get-FileHash -ErrorAction SilentlyContinue\n$PSModuleAutoLoadingPreference = 'None'\n"
+        helper_path.write_text(missing_hash_setup + helper_path.read_text(encoding='utf-8'), encoding='utf-8')
     parent = subprocess.Popen([str(target)], cwd=root)
     data = json.loads(plan.read_text(encoding="utf-8"))
     data["parent_pid"] = parent.pid
