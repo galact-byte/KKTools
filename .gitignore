@@ -38,3 +38,15 @@ examples_pic/
 
 # 构建时自动生成的版本信息
 core/build_info.json
+
+# Web 前端依赖与构建产物
+web/node_modules/
+web/dist/
+
+# 本地参考程序与检查截图
+/OnionProtocol/
+/out/
+web/*.tsbuildinfo
+
+# 交付构建配置
+!KKTools.spec

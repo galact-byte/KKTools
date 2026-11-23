@@ -1,6 +1,6 @@
 """KKTools 启动器 —— 恋活 / 恋活日光浴 角色卡工具箱。
 
-职责：检查 Python 版本、自动补齐依赖、启动 PyQt6 桌面应用。
+职责：检查 Python 版本、自动补齐依赖、启动 WebView2 桌面应用。
 所有中文提示集中在这里，start.bat 只做最小引导。
 """
 
@@ -18,8 +18,8 @@ def run(cmd: str) -> subprocess.CompletedProcess:
 def check_python() -> None:
     ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     print(f"[OK] Python 版本: {ver}")
-    if sys.version_info < (3, 9):
-        print("[X] 需要 Python 3.9+，请升级后重试")
+    if sys.version_info < (3, 10):
+        print("[X] 需要 Python 3.10+，请升级后重试")
         sys.exit(1)
 
 
@@ -27,7 +27,7 @@ def check_dependencies() -> None:
     print("\n检查依赖包...")
     # import 名 -> pip 安装名
     packages = {
-        "PyQt6": "PyQt6",
+        "webview": "pywebview",
         "msgpack": "msgpack",
         "PIL": "Pillow",
         "pyzipper": "pyzipper",

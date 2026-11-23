@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import shutil
 import tempfile
 import zlib
 import zipfile
@@ -232,14 +233,36 @@ def split_file(
 def join_parts(first_part: str | Path, out_path: str | Path) -> str:
     """把 name.001 / name.002 ... 合并回原文件。传入 .001 分卷路径。"""
     first_part = Path(first_part)
-    stem = first_part.with_suffix("")  # 去掉 .001
+    if first_part.suffix != ".001":
+        raise ValueError("请选择 .001 首卷文件")
+    if not first_part.is_file():
+        raise FileNotFoundError(f"首卷不存在：{first_part}")
+    stem = first_part.with_suffix("")
     out_path = Path(out_path)
-    parts = sorted(stem.parent.glob(stem.name + ".[0-9][0-9][0-9]"))
-    if not parts:
-        raise FileNotFoundError("未找到分卷文件")
-    with open(out_path, "wb") as out:
-        for p in parts:
-            out.write(p.read_bytes())
+    parts = sorted(
+        (p for p in stem.parent.iterdir()
+         if p.is_file() and p.stem == stem.name and len(p.suffix) >= 4
+         and p.suffix[1:].isascii() and p.suffix[1:].isdigit()),
+        key=lambda p: int(p.suffix[1:]),
+    )
+    for expected, part in enumerate(parts, 1):
+        if int(part.suffix[1:]) != expected:
+            raise ValueError(f"分卷不连续：缺少或重复 {stem.name}.{expected:03d}")
+    if any(out_path.resolve() == part.resolve() for part in parts):
+        raise ValueError("合并目标不能覆盖输入分卷")
+
+    # 完整校验后才开始写入；读写中途失败也不破坏旧输出或留下成功假象。
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=out_path.parent, prefix=".kktools-join-", delete=False) as out:
+            temporary = Path(out.name)
+            for part in parts:
+                with part.open("rb") as source:
+                    shutil.copyfileobj(source, out)
+        temporary.replace(out_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return str(out_path)
 
 

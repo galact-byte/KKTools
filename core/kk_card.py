@@ -559,41 +559,63 @@ def classify(data: bytes) -> tuple[str, str, str]:
     return ("other", "?", marker or "")
 
 
-def extract_mod_ids(card: "KoikatuCard") -> dict[str, int]:
-    """从角色卡的 Sideloader UAR 扩展数据提取所依赖的 mod ModID（对应 manifest guid）。
-
-    返回 {ModID: 出现次数}。无依赖或非角色卡返回空字典。
-    路径：KKEx 块 -> "com.bepis.sideloader.universalautoresolver" -> [ver, {"info": [blob...]}]
-    每个 blob 再 msgpack 解出 {"ModID": ...}。
-    """
+def _extract_uar_mod_ids(uar, *, strict: bool = False) -> dict[str, int]:
+    """解码角色与场景共用的 UAR 记录；归档使用严格模式，禁止静默跳过坏记录。"""
     out: dict[str, int] = {}
-    if "KKEx" not in card.blocks:
+    if not isinstance(uar, (list, tuple)) or len(uar) < 2 or not isinstance(uar[1], dict):
+        if strict:
+            raise KKCardError("UAR 依赖结构无法完整解析")
         return out
-    try:
-        kkex = card.get_block_dict("KKEx")
-    except KKCardError:
-        return out
-    if not isinstance(kkex, dict):
-        return out
-    uar = kkex.get("com.bepis.sideloader.universalautoresolver")
-    if not isinstance(uar, (list, tuple)) or len(uar) < 2:
-        return out
-    payload = uar[1]
-    info = payload.get("info") if isinstance(payload, dict) else None
+    info = uar[1].get("info", [])
+    if info is None:
+        info = []
     if not isinstance(info, (list, tuple)):
+        if strict:
+            raise KKCardError("UAR 依赖列表无法完整解析")
         return out
     for blob in info:
-        if not isinstance(blob, (bytes, bytearray)):
-            continue
         try:
-            d = msgpack.unpackb(blob, raw=False, strict_map_key=False)
-        except Exception:  # noqa: BLE001 - 单条坏数据跳过，不影响整体
-            continue
-        if isinstance(d, dict):
-            mid = d.get("ModID")
-            if isinstance(mid, str) and mid:
-                out[mid] = out.get(mid, 0) + 1
+            if not isinstance(blob, (bytes, bytearray)):
+                raise KKCardError("UAR 依赖记录不是二进制数据")
+            record = msgpack.unpackb(blob, raw=False, strict_map_key=False)
+            mid = record.get("ModID") if isinstance(record, dict) else None
+            if not isinstance(mid, str) or not mid:
+                raise KKCardError("UAR 依赖记录缺少有效 ModID")
+            out[mid] = out.get(mid, 0) + 1
+        except Exception as exc:  # noqa: BLE001
+            if strict:
+                raise KKCardError(f"UAR 依赖记录无法完整解析：{exc}") from exc
     return out
+
+
+def extract_mod_ids(card: "KoikatuCard", *, strict: bool = False) -> dict[str, int]:
+    """从角色卡 KKEx 中的 Sideloader UAR 提取 {ModID: 出现次数}。
+
+    无 KKEx 或无 UAR 视为无依赖；strict=True 时，损坏块和坏记录必须报错。
+    """
+    if strict and any(b.pos < 0 or b.size < 0 or b.pos + b.size > len(card._data_blob)
+                      for b in card.block_order):
+        raise KKCardError("卡片数据块越界，无法完整分析依赖")
+    if "KKEx" not in card.blocks:
+        return {}
+    try:
+        if strict:
+            try:
+                kkex = msgpack.unpackb(card.blocks["KKEx"], raw=False, strict_map_key=False)
+            except Exception as exc:  # noqa: BLE001
+                raise KKCardError(f"KKEx 无法完整解析：{exc}") from exc
+        else:
+            kkex = card.get_block_dict("KKEx")
+        if not isinstance(kkex, dict):
+            raise KKCardError("KKEx 不是有效扩展字典")
+    except KKCardError:
+        if strict:
+            raise
+        return {}
+    key = "com.bepis.sideloader.universalautoresolver"
+    if key not in kkex:
+        return {}
+    return _extract_uar_mod_ids(kkex[key], strict=strict)
 
 
 def _read_7bit_int_stream(f) -> int:

@@ -1,0 +1,537 @@
+@import "tailwindcss";
+
+/* ============================================================================
+   KKTools · 日系清爽二次元工具风视觉系统 (Sora Studio Design System)
+   4 套高定主题 + 实时壁纸毛玻璃融合引擎 + 严格对比度与键盘焦点保障
+   ============================================================================ */
+
+:root {
+  --font-ui: "Noto Sans SC", "Noto Sans JP", "Yu Gothic UI", "Microsoft YaHei UI", sans-serif;
+  --font-display: "Noto Serif SC", "Noto Serif JP", "Noto Sans SC", serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", "Bahnschrift", Consolas, monospace;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* 动态壁纸参数（由 App 状态实时写入） */
+  --glass-blur: 18px;
+  --panel-alpha: 0.84;
+  --overlay-alpha: 0.52;
+
+  /* 默认主题：晴空·画室 (sora_light) */
+  --bg: #eef4fc;
+  --bg-subtle: #e4edf9;
+  --bg-rgb: 238, 244, 252;
+  --surface: #ffffff;
+  --surface-rgb: 255, 255, 255;
+  --surface-alt: #f5f8fd;
+  --surface-alt-rgb: 245, 248, 253;
+  --sidebar-rgb: 248, 251, 255;
+  --topbar-rgb: 250, 252, 255;
+
+  --border: rgba(30, 64, 118, 0.13);
+  --border-strong: rgba(30, 64, 118, 0.24);
+  --border-glass: rgba(255, 255, 255, 0.72);
+
+  --text-strong: #0f1f38;
+  --text: #223550;
+  --text-muted: #556985;
+  --text-dim: #6e819c;
+
+  --primary: #1a73e8;
+  --primary-hover: #155fc4;
+  --primary-soft: rgba(26, 115, 232, 0.11);
+  --primary-border: rgba(26, 115, 232, 0.30);
+  --on-primary: #ffffff;
+
+  /* 樱绯点缀：仅用于二次元角色属性徽章/心动标签，与危险色严格区隔 */
+  --sakura: #e0527c;
+  --sakura-soft: rgba(224, 82, 124, 0.11);
+  --sakura-border: rgba(224, 82, 124, 0.30);
+
+  --success: #1b8a5a;
+  --success-soft: rgba(27, 138, 90, 0.12);
+  --warning: #b87414;
+  --warning-soft: rgba(184, 116, 20, 0.12);
+  --danger: #cf3636;
+  --danger-soft: rgba(207, 54, 54, 0.11);
+
+  --shadow-card: 0 2px 12px rgba(17, 42, 82, 0.05), 0 1px 2px rgba(17, 42, 82, 0.04);
+  --shadow-float: 0 10px 30px rgba(17, 42, 82, 0.10), 0 2px 6px rgba(17, 42, 82, 0.05);
+  --overlay-color: #eef5ff;
+}
+
+/* 主题 2：和纸·午后 (washi_light) */
+[data-theme="washi_light"] {
+  --bg: #f4efe6;
+  --bg-subtle: #eae3d6;
+  --bg-rgb: 244, 239, 230;
+  --surface: #fffdf9;
+  --surface-rgb: 255, 253, 249;
+  --surface-alt: #f8f4ec;
+  --surface-alt-rgb: 248, 244, 236;
+  --sidebar-rgb: 250, 246, 238;
+  --topbar-rgb: 252, 249, 243;
+
+  --border: rgba(74, 58, 42, 0.13);
+  --border-strong: rgba(74, 58, 42, 0.26);
+  --border-glass: rgba(255, 252, 245, 0.72);
+
+  --text-strong: #1e1914;
+  --text: #342c24;
+  --text-muted: #695d50;
+  --text-dim: #7f7264;
+
+  --primary: #295f8d;
+  --primary-hover: #204d73;
+  --primary-soft: rgba(41, 95, 141, 0.11);
+  --primary-border: rgba(41, 95, 141, 0.30);
+  --on-primary: #ffffff;
+
+  --sakura: #c9624a;
+  --sakura-soft: rgba(201, 98, 74, 0.11);
+  --sakura-border: rgba(201, 98, 74, 0.30);
+
+  --success: #2a7e56;
+  --success-soft: rgba(42, 126, 86, 0.12);
+  --warning: #a86b15;
+  --warning-soft: rgba(168, 107, 21, 0.12);
+  --danger: #bf3939;
+  --danger-soft: rgba(191, 57, 57, 0.11);
+
+  --shadow-card: 0 2px 12px rgba(62, 46, 28, 0.05), 0 1px 2px rgba(62, 46, 28, 0.04);
+  --shadow-float: 0 10px 28px rgba(62, 46, 28, 0.10), 0 2px 6px rgba(62, 46, 28, 0.05);
+  --overlay-color: #f6f0e5;
+}
+
+/* 主题 3：月夜·星图 (tsukiyo_dark) */
+[data-theme="tsukiyo_dark"] {
+  --bg: #0e1420;
+  --bg-subtle: #090e17;
+  --bg-rgb: 14, 20, 32;
+  --surface: #151d2d;
+  --surface-rgb: 21, 29, 45;
+  --surface-alt: #1b2538;
+  --surface-alt-rgb: 27, 37, 56;
+  --sidebar-rgb: 16, 22, 35;
+  --topbar-rgb: 17, 24, 38;
+
+  --border: rgba(162, 194, 245, 0.14);
+  --border-strong: rgba(162, 194, 245, 0.28);
+  --border-glass: rgba(186, 214, 255, 0.16);
+
+  --text-strong: #f2f6fd;
+  --text: #d7e1f0;
+  --text-muted: #93a4be;
+  --text-dim: #7b8da8;
+
+  --primary: #4ea1ff;
+  --primary-hover: #70b5ff;
+  --primary-soft: rgba(78, 161, 255, 0.16);
+  --primary-border: rgba(78, 161, 255, 0.38);
+  --on-primary: #091322;
+
+  --sakura: #f47fa1;
+  --sakura-soft: rgba(244, 127, 161, 0.16);
+  --sakura-border: rgba(244, 127, 161, 0.36);
+
+  --success: #45c088;
+  --success-soft: rgba(69, 192, 136, 0.15);
+  --warning: #e5a94c;
+  --warning-soft: rgba(229, 169, 76, 0.15);
+  --danger: #f06d6d;
+  --danger-soft: rgba(240, 109, 109, 0.16);
+
+  --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.28);
+  --shadow-float: 0 14px 36px rgba(0, 0, 0, 0.44);
+  --overlay-color: #0b111c;
+}
+
+/* 主题 4：终端·纸 (yorha_light) — 统一圆角家族的米灰和纸高对比风格 */
+[data-theme="yorha_light"] {
+  --bg: #e6e1d3;
+  --bg-subtle: #dcd6c5;
+  --bg-rgb: 230, 225, 211;
+  --surface: #efeadd;
+  --surface-rgb: 239, 234, 221;
+  --surface-alt: #e4dfd0;
+  --surface-alt-rgb: 228, 223, 208;
+  --sidebar-rgb: 226, 220, 205;
+  --topbar-rgb: 228, 222, 208;
+
+  --border: rgba(68, 63, 53, 0.18);
+  --border-strong: rgba(54, 50, 42, 0.36);
+  --border-glass: rgba(248, 244, 232, 0.62);
+
+  --text-strong: #23201b;
+  --text: #3a352c;
+  --text-muted: #5f584b;
+  --text-dim: #736b5c;
+
+  --primary: #3b372e;
+  --primary-hover: #25221c;
+  --primary-soft: rgba(59, 55, 46, 0.12);
+  --primary-border: rgba(59, 55, 46, 0.36);
+  --on-primary: #f2ede0;
+
+  --sakura: #9c4a3c;
+  --sakura-soft: rgba(156, 74, 60, 0.12);
+  --sakura-border: rgba(156, 74, 60, 0.34);
+
+  --success: #3e6b48;
+  --success-soft: rgba(62, 107, 72, 0.14);
+  --warning: #8f6321;
+  --warning-soft: rgba(143, 99, 33, 0.14);
+  --danger: #9e3830;
+  --danger-soft: rgba(158, 56, 48, 0.14);
+
+  --shadow-card: 0 2px 10px rgba(45, 40, 32, 0.06);
+  --shadow-float: 0 10px 26px rgba(45, 40, 32, 0.13);
+  --overlay-color: #e6e1d3;
+}
+
+/* 基础重置 */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-ui);
+    color: var(--text);
+    background-color: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  select,
+  pre,
+  code {
+    user-select: text;
+    font-family: var(--font-ui);
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 清晰可访问的键盘焦点环 */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* 表面卡片、毛玻璃与按钮输入组件放入 components 层，确保 Tailwind 工具类（如 pl-9）正常生效 */
+@layer components {
+  .kk-surface {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  }
+
+  .kk-surface-alt {
+    background-color: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
+
+  [data-wallpaper="on"] .kk-surface {
+    background-color: rgba(var(--surface-rgb), var(--panel-alpha));
+    border-color: var(--border-glass);
+    backdrop-filter: blur(var(--glass-blur)) saturate(155%);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(155%);
+  }
+
+  [data-wallpaper="on"] .kk-surface-alt {
+    background-color: rgba(var(--surface-alt-rgb), calc(var(--panel-alpha) * 0.92));
+    border-color: var(--border-glass);
+    backdrop-filter: blur(calc(var(--glass-blur) * 0.8)) saturate(140%);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.8)) saturate(140%);
+  }
+
+  [data-wallpaper="on"] .kk-sidebar {
+    background-color: rgba(var(--sidebar-rgb), min(0.94, calc(var(--panel-alpha) + 0.04)));
+    backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(160%);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(160%);
+  }
+
+  [data-wallpaper="on"] .kk-topbar {
+    background-color: rgba(var(--topbar-rgb), min(0.94, calc(var(--panel-alpha) + 0.02)));
+    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  }
+
+  .kk-sidebar {
+    background-color: rgb(var(--sidebar-rgb));
+    border-right: 1px solid var(--border);
+    transition: width 240ms cubic-bezier(0.22, 1, 0.36, 1), background-color 220ms ease, border-color 220ms ease;
+  }
+
+  .kk-topbar {
+    background-color: rgb(var(--topbar-rgb));
+    border-bottom: 1px solid var(--border);
+    transition: background-color 220ms ease, border-color 220ms ease;
+  }
+
+  /* 弹窗/菜单保持高实心可读性 */
+  .kk-popover {
+    background-color: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-float);
+    animation: kkPopEnter 165ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* 页面与抽屉丝滑入场动效 */
+  .kk-page-enter {
+    animation: kkPageEnter 210ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .kk-tab-enter {
+    animation: kkTabEnter 175ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .kk-drawer-enter {
+    animation: kkDrawerEnter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .kk-modal-enter {
+    animation: kkModalEnter 210ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .kk-backdrop-enter {
+    animation: kkFadeIn 180ms ease-out both;
+  }
+
+  .kk-progress-bar {
+    height: 6px;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 999px;
+    background-color: var(--surface-alt);
+    border: 1px solid var(--border);
+  }
+
+  .kk-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background-color: var(--primary);
+    transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* 无壁纸时的微妙日系点阵画纸质感 */
+  .kk-canvas-pattern {
+    background-color: var(--bg);
+    background-image: radial-gradient(var(--border) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  [data-wallpaper="on"] .kk-canvas-pattern {
+    background-color: transparent;
+    background-image: none;
+  }
+
+  /* 按钮与输入通用微交互（遵循功能型克制原则：不跳动，只做顺滑色彩/描边反馈） */
+  .kk-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.2;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background-color: var(--surface);
+    color: var(--text-strong);
+    cursor: pointer;
+    transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, opacity 140ms ease;
+  }
+
+  .kk-btn:hover:not(:disabled) {
+    background-color: var(--surface-alt);
+    border-color: var(--primary-border);
+  }
+
+  .kk-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .kk-btn-primary {
+    background-color: var(--primary);
+    border-color: var(--primary);
+    color: var(--on-primary);
+    font-weight: 600;
+  }
+
+  .kk-btn-primary:hover:not(:disabled) {
+    background-color: var(--primary-hover);
+    border-color: var(--primary-hover);
+    color: var(--on-primary);
+  }
+
+  .kk-btn-ghost {
+    background-color: transparent;
+    border-color: transparent;
+    color: var(--text-muted);
+  }
+
+  .kk-btn-ghost:hover:not(:disabled) {
+    background-color: var(--primary-soft);
+    border-color: transparent;
+    color: var(--text-strong);
+  }
+
+  .kk-btn-danger {
+    background-color: var(--danger-soft);
+    border-color: rgba(207, 54, 54, 0.35);
+    color: var(--danger);
+  }
+
+  .kk-btn-danger:hover:not(:disabled) {
+    background-color: var(--danger);
+    border-color: var(--danger);
+    color: #ffffff;
+  }
+
+  .kk-input {
+    width: 100%;
+    padding: 7px 11px;
+    font-size: 13px;
+    line-height: 1.4;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background-color: var(--surface);
+    color: var(--text-strong);
+    transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+  }
+
+  .kk-input:hover:not(:disabled) {
+    border-color: var(--primary-border);
+  }
+
+  .kk-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-soft);
+  }
+
+  .kk-input::placeholder {
+    color: var(--text-dim);
+  }
+}
+
+/* 精细自定义滚动条 */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+@keyframes kkPageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes kkTabEnter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes kkDrawerEnter {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes kkPopEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes kkModalEnter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes kkFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

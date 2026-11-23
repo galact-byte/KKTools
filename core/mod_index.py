@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Callable, Iterable
 
 from core.kk_card import KoikatuCard, extract_mod_ids
@@ -210,24 +210,28 @@ class MissingReport:
         return len(self.missing)
 
 
-def check_card(card_path: str | Path, index: ModIndex) -> MissingReport:
+def check_card(card_path: str | Path, index: ModIndex, *, strict: bool = False) -> MissingReport:
     """检查一张卡的 mod 依赖在索引中的缺失情况。
 
     角色卡：直接读 Sideloader UAR。场景卡：聚合内嵌角色依赖 + 场景级 studio 道具依赖。
     """
-    from core.kk_card import KoikatuCard as _KC, is_character_card
+    from core.kk_card import KoikatuCard as _KC, KKCardError, classify, is_character_card
 
     data = Path(card_path).read_bytes()
-    if is_character_card(data):
-        required = extract_mod_ids(_KC.from_bytes(data))
+    kind = classify(data)[0] if strict else None
+    if is_character_card(data) or kind == "coordinate":
+        required = extract_mod_ids(_KC.from_bytes(data), strict=strict)
     else:
-        # 场景卡（或其它带内嵌角色的卡）
+        if strict and kind != "scene":
+            raise KKCardError("无法识别为可完整分析的角色卡、服装卡或场景卡")
         from core import scene_card
+        if strict and scene_card.get_scene_preview(data) is None:
+            raise KKCardError("场景卡封面损坏，无法完整分析")
         required = {}
-        for c in scene_card.find_embedded_characters(data):
-            for g, n in extract_mod_ids(c).items():
+        for c in scene_card.find_embedded_characters(data, strict=strict):
+            for g, n in extract_mod_ids(c, strict=strict).items():
                 required[g] = required.get(g, 0) + n
-        for g, n in scene_card.extract_scene_mod_ids(data).items():
+        for g, n in scene_card.extract_scene_mod_ids(data, strict=strict).items():
             required[g] = required.get(g, 0) + n
 
     present = [g for g in required if g in index]
@@ -241,7 +245,8 @@ def check_card(card_path: str | Path, index: ModIndex) -> MissingReport:
 
 
 def _safe_name(s: str) -> str:
-    return "".join(c for c in (s or "") if c not in r'\/:*?"<>|').strip()
+    name = "".join(c for c in (s or "") if c not in r'\/:*?"<>|' and ord(c) >= 32).strip().rstrip('. ')
+    return '' if not name or PureWindowsPath(name).is_reserved() else name
 
 
 def export_guid_list(index: ModIndex, path: str | Path) -> int:
@@ -347,6 +352,8 @@ def organize_by_author(
         else:
             author = _safe_name(e.author) or "未知作者"
             dst_dir = target / author
+            if not dst_dir.resolve().is_relative_to(target.resolve()):
+                raise ValueError(f"整理目标超出所选输出目录：{dst_dir}")
             dst = dst_dir / src.name
             try:
                 if src.resolve() == dst.resolve():
@@ -380,12 +387,14 @@ def archive_unreferenced(
     先求所有卡片依赖 guid 的并集，索引中不在并集里的即未引用。
     注意：未引用是相对于**所选卡片**而言，请谨慎选卡。move=False 默认复制。
     """
+    if not card_paths:
+        raise ValueError("请先选择需要分析的卡片，不能用空选择判断未引用 Mod")
     used: set[str] = set()
     for cp in card_paths:
         try:
-            used |= set(check_card(cp, index).required)
-        except Exception:  # noqa: BLE001
-            continue
+            used.update(check_card(cp, index, strict=True).required)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"卡片依赖分析不完整，已停止归档：{cp}\n{exc}") from exc
     archive = Path(archive_dir)
     entries = list(index.entries.items())
     total = len(entries)

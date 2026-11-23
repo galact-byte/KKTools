@@ -20,6 +20,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build Web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -32,8 +43,6 @@ jobs:
           pip install pyinstaller pytest
 
       - name: Run tests
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q
 
       - name: Write build metadata
@@ -56,14 +65,17 @@ jobs:
           }
 
       - name: Build with PyInstaller
+        run: pyinstaller --noconfirm --clean KKTools.spec
+
+      - name: Verify bundled resources
+        shell: python
         run: |
-          pyinstaller --onefile --windowed --name KKTools `
-            --add-data "ui/themes;ui/themes" `
-            --add-data "ui/icons;ui/icons" `
-            --add-data "ui/style.qss.tmpl;ui" `
-            --add-data "core/build_info.json;core" `
-            --clean `
-            main.py
+          from PyInstaller.archive.readers import CArchiveReader
+          archive = CArchiveReader('dist/KKTools.exe')
+          names = {name.replace('\\', '/') for name in archive.toc}
+          for required in ['web/dist/index.html', 'core/update_helper.ps1', 'core/build_info.json']:
+              assert required in names, required
+          assert not any('PyQt6' in name or name.startswith('ui/') for name in names)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -26,8 +26,13 @@ DEFAULTS: dict = {
     "output_dir": "",           # 通用输出目录
     "last_browse_dir": "",      # 浏览器上次打开目录
     "carrier_dir": "",          # 伪装载体（视频/图片）目录
-    "theme": "bone_light",      # 当前主题 id（默认身份：骨白·昼）
+    "theme": "cloud_light",     # 当前主题 id（默认身份：晴空·昼）
     "user_theme_dir": "",       # 用户自定义主题目录（可空）
+    "wallpaper_path": "",       # 自定义背景壁纸图片路径（为空则使用纯色主题）
+    "wallpaper_blur": 18,
+    "wallpaper_enabled": True,
+    "wallpaper_overlay": 55,    # 壁纸遮罩浓度（0~90%，保护文字可读性）
+    "wallpaper_panel_alpha": 82,  # 壁纸模式下卡片/面板不透明度（45~100%）
     "frameless": False,         # 标题栏：False=系统原生窗口（默认，更稳）；True=无边框自绘
     "ui_mode": "normal",        # 界面模式：normal=精简常用；advanced=展开全部高级选项
     "start_page": 1,            # 启动停在的页索引（默认浏览器；见 main_window.NAV）

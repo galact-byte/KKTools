@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Callable
 
 from core.kk_card import KoikatuCard, extract_mod_ids
@@ -18,6 +18,24 @@ def _card_name(path: Path) -> str:
         return name or path.stem
     except Exception:  # noqa: BLE001
         return path.stem
+
+
+def _safe_group_name(name: str) -> str:
+    safe = "".join(c for c in name if c not in r'\/:*?"<>|' and ord(c) >= 32).strip().rstrip(". ")
+    if not safe or PureWindowsPath(safe).is_reserved():
+        return "未命名"
+    return safe
+
+
+def _copy_unique(source: Path, folder: Path) -> Path:
+    """为名称冲突递增编号，保留已有文件和每一份输入。"""
+    target = folder / source.name
+    number = 2
+    while target.exists() or target.is_symlink():
+        target = folder / f"{source.stem} ({number}){source.suffix}"
+        number += 1
+    shutil.copy2(source, target)
+    return target
 
 
 def build_share_package(
@@ -42,11 +60,12 @@ def build_share_package(
     exclude = exclude_guids or set()
 
     report = {"cards": [], "total_missing": set(), "copied_mods": set(), "excluded_mods": set()}
+    copied_dependencies: set[tuple[Path, str]] = set()
     total = len(card_paths)
     for i, cp in enumerate(card_paths, 1):
         cp = Path(cp)
         name = _card_name(cp)
-        safe = "".join(c for c in name if c not in r'\/:*?"<>|').strip() or cp.stem
+        safe = _safe_group_name(name)
 
         if group_by_char:
             base = out_dir / safe
@@ -55,10 +74,12 @@ def build_share_package(
         else:
             card_dst_dir = out_dir / "cards"
             mods_dst_dir = out_dir / "mods"
-        card_dst_dir.mkdir(parents=True, exist_ok=True)
-        mods_dst_dir.mkdir(parents=True, exist_ok=True)
+        for folder in (card_dst_dir, mods_dst_dir):
+            if not folder.resolve().is_relative_to(out_dir.resolve()):
+                raise ValueError(f"分享目标超出所选输出目录：{folder}")
+            folder.mkdir(parents=True, exist_ok=True)
 
-        shutil.copy2(cp, card_dst_dir / cp.name)
+        copied_card = _copy_unique(cp, card_dst_dir)
 
         try:
             card = KoikatuCard.load(cp)
@@ -74,16 +95,17 @@ def build_share_package(
                 continue
             entry = index.get(guid)
             if entry and entry.path and Path(entry.path).exists():
-                dst = mods_dst_dir / Path(entry.path).name
-                if not dst.exists():
-                    shutil.copy2(entry.path, dst)
+                dependency = (mods_dst_dir.resolve(), guid)
+                if dependency not in copied_dependencies:
+                    _copy_unique(Path(entry.path), mods_dst_dir)
+                    copied_dependencies.add(dependency)
                 present.append(guid)
                 report["copied_mods"].add(guid)
             else:
                 missing.append(guid)
         report["total_missing"].update(missing)
         report["cards"].append({
-            "card": cp.name, "name": name,
+            "card": copied_card.name, "name": name,
             "required": len(required), "copied": len(present),
             "missing": missing, "excluded": len(excluded),
         })
@@ -162,7 +184,7 @@ def organize_cards(
     move: bool = False,
     progress: Callable[[int, int, str], None] | None = None,
 ) -> dict:
-    """整理卡片：按类型(type)或角色名(character)归类复制/移动到 out_dir/<分组>/。"""
+    """按类型、角色名或游戏版本归类复制/移动卡片。"""
     from core.card_scan import TYPE_LABELS
     from core.kk_card import read_card_light
 
@@ -177,12 +199,16 @@ def organize_cards(
             info = read_card_light(p)
         except OSError:
             continue
-        if by == "character":
+        if by == "game":
+            group = info.game if info.game in ("KK", "KKS") else "其它"
+        elif by == "character":
             group = (info.name or "未命名").strip()
         else:
             group = TYPE_LABELS.get(info.type, "其它")
-        group = "".join(c for c in group if c not in r'\/:*?"<>|').strip() or "未分类"
+        group = _safe_group_name(group)
         dst_dir = out / group
+        if not dst_dir.resolve().is_relative_to(out.resolve()):
+            raise ValueError(f"整理目标超出所选输出目录：{dst_dir}")
         dst = dst_dir / p.name
         try:
             if dst.exists() or src.resolve() == out.resolve():

@@ -26,8 +26,8 @@ def log_path(tmp_path, monkeypatch):
 
 
 def test_operation_log_persists_as_utf8(log_path):
-    from ui.applog import log
-    log("打包操作完成：中文.zipmod")
+    from web_bridge import KKToolsBridge
+    KKToolsBridge().record_log('info', 'PACK', '打包操作完成：中文.zipmod')
     text = log_path.read_text(encoding="utf-8")
     assert "打包操作完成：中文.zipmod" in text
     assert "Python" in text
@@ -35,14 +35,18 @@ def test_operation_log_persists_as_utf8(log_path):
 
 
 def test_worker_failure_records_traceback_before_ui_callback(log_path):
-    from ui.worker import Worker
+    import time
+    from web_bridge import _TaskManager
 
-    def failing_job():
+    def failing_job(report):
         raise ValueError("worker-test-error")
 
-    worker = Worker(failing_job)
-    worker.start()
-    assert worker.wait(5000)
+    tasks = _TaskManager()
+    task_id = tasks.start(failing_job)
+    deadline = time.monotonic() + 5
+    while tasks.get(task_id)['status'] == 'running':
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
     text = log_path.read_text(encoding="utf-8")
     assert "Traceback" in text
     assert "failing_job" in text
@@ -71,47 +75,25 @@ raise ValueError("startup-test-error")
     assert "Traceback" in text
 
 
-def test_log_page_opens_log_folder_and_clear_keeps_file(log_path, monkeypatch):
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PyQt6.QtWidgets import QApplication, QPushButton
-    from ui.applog import log
-    from ui.pages import log_page
-
-    app = QApplication.instance() or QApplication([])
-    log("保留此条操作记录")
-    page = log_page.LogPage()
+def test_log_directory_opens_without_removing_log(log_path, monkeypatch):
+    import web_bridge
+    bridge = web_bridge.KKToolsBridge()
+    bridge.record_log('info', 'TEST', '保留此条操作记录')
     opened = []
-    monkeypatch.setattr(log_page.QDesktopServices, "openUrl", lambda url: opened.append(url) or True)
-    buttons = {button.text(): button for button in page.findChildren(QPushButton)}
-    buttons["打开日志目录"].click()
-    assert Path(opened[0].toLocalFile()) == log_path.parent
-    buttons["清空显示"].click()
-    assert not page.view.toPlainText()
+    monkeypatch.setattr(web_bridge.os, 'startfile', lambda path: opened.append(path))
+    assert bridge.open_log_directory()['ok']
+    assert Path(opened[0]) == log_path.parent
     assert "保留此条操作记录" in log_path.read_text(encoding="utf-8")
-    page.close()
-    page.deleteLater()
-    app.processEvents()
 
 
 def test_handled_card_error_also_records_diagnostics(log_path, tmp_path, monkeypatch):
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PyQt6.QtWidgets import QApplication
-    from ui.pages import editor_page
-
-    app = QApplication.instance() or QApplication([])
-    page = editor_page.EditorPage()
-    warnings = []
-    monkeypatch.setattr(editor_page.QMessageBox, "warning", lambda *args: warnings.append(args))
+    from web_bridge import KKToolsBridge
     invalid = tmp_path / "broken.png"
     invalid.write_bytes(b"not a PNG card")
-    page.load_card(str(invalid))
-    assert warnings
+    assert not KKToolsBridge().load_card(str(invalid))['ok']
     text = log_path.read_text(encoding="utf-8")
     assert "Traceback" in text
     assert "KKCardError" in text
-    page.close()
-    page.deleteLater()
-    app.processEvents()
 
 
 def test_windowed_process_without_standard_streams_still_logs(tmp_path):

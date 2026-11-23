@@ -14,7 +14,9 @@ from core.kk_card import (
     PNG_SIGNATURE,
     BlockInfo,
     KoikatuCard,
+    KKCardError,
     _Reader,
+    _extract_uar_mod_ids,
     extract_mod_ids,
     png_data_length,
 )
@@ -86,8 +88,8 @@ def _parse_embedded(data: bytes, marker_full_start: int) -> KoikatuCard | None:
     )
 
 
-def find_embedded_characters(data: bytes) -> list[KoikatuCard]:
-    """扫描场景卡字节，返回所有成功解析的内嵌角色卡。"""
+def find_embedded_characters(data: bytes, *, strict: bool = False) -> list[KoikatuCard]:
+    """扫描内嵌角色；严格模式遇到无法解析的角色即报错。"""
     seen_starts: set[int] = set()
     cards: list[KoikatuCard] = []
     for pat in CHARA_MARKER_PATTERNS:
@@ -102,6 +104,8 @@ def find_embedded_characters(data: bytes) -> list[KoikatuCard]:
             card = _parse_embedded(data, start)
             if card is not None:
                 cards.append(card)
+            elif strict:
+                raise KKCardError("场景内嵌角色损坏，无法完整分析依赖")
     return cards
 
 
@@ -145,33 +149,26 @@ def extract_characters_to(scene_path: str | Path, out_dir: str | Path) -> list[s
 _UAR_SIG = b"com.bepis.sideloader.universalautoresolver"
 
 
-def extract_scene_mod_ids(data: bytes) -> dict[str, int]:
-    """提取场景级 Sideloader 依赖（studio 道具/姿势/地图等的 ModID）。
-
-    场景里也存了 UAR：紧跟签名的是 [版本, {"info": [blob...]}]，每个 blob 再 msgpack
-    解出 ModID（与角色卡同构）。无 studio mod 依赖的场景该 info 为空，返回空字典。
-    """
+def extract_scene_mod_ids(data: bytes, *, strict: bool = False) -> dict[str, int]:
+    """提取场景级 Sideloader 依赖；严格模式检查每一处 UAR，坏记录必须报错。"""
     out: dict[str, int] = {}
-    pos = data.find(_UAR_SIG)
-    if pos < 0:
-        return out
-    up = msgpack.Unpacker(raw=False, strict_map_key=False)
-    up.feed(data[pos + len(_UAR_SIG):])
-    try:
-        val = next(iter(up))
-    except Exception:  # noqa: BLE001
-        return out
-    if isinstance(val, (list, tuple)) and len(val) >= 2 and isinstance(val[1], dict):
-        for blob in val[1].get("info") or []:
-            if isinstance(blob, (bytes, bytearray)):
-                try:
-                    d = msgpack.unpackb(blob, raw=False, strict_map_key=False)
-                except Exception:  # noqa: BLE001
-                    continue
-                if isinstance(d, dict):
-                    mid = d.get("ModID")
-                    if isinstance(mid, str) and mid:
-                        out[mid] = out.get(mid, 0) + 1
+    pos = -1
+    while True:
+        pos = data.find(_UAR_SIG, pos + 1)
+        if pos < 0:
+            break
+        up = msgpack.Unpacker(raw=False, strict_map_key=False)
+        up.feed(data[pos + len(_UAR_SIG):])
+        try:
+            val = next(iter(up))
+        except Exception as exc:  # noqa: BLE001
+            if strict:
+                raise KKCardError("场景 UAR 依赖无法完整解析") from exc
+            return out
+        for guid, count in _extract_uar_mod_ids(val, strict=strict).items():
+            out[guid] = out.get(guid, 0) + count
+        if not strict:
+            break
     return out
 
 
