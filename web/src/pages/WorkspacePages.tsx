@@ -1,5 +1,6 @@
+import { AutoImportPanel, DataExportButton, RecoveryPanel } from '../components/WorkflowTools'
 import { ModExchange } from '../components/ModExchange'
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Archive,
   Clapperboard,
@@ -36,7 +37,7 @@ export const PackPage: React.FC<{
   onNotify: (msg: string, tone?: 'info' | 'ok' | 'warn' | 'error') => void
   onLog: (level: LogEntry['level'], source: string, msg: string) => void
 }> = ({ defaultOutDir, uiMode, onNotify, onLog }) => {
-  const [mode, setMode] = useState<'pack' | 'unpack'>('pack')
+  const [mode, setMode] = useState<'pack' | 'unpack' | 'recovery'>('pack')
   // 打包态
   const [sources, setSources] = useState<string[]>([])
   const [archiveName, setArchiveName] = useState('KKTools_Pack')
@@ -46,6 +47,9 @@ export const PackPage: React.FC<{
   const [passwordInput, setPasswordInput] = useState('')
   const [splitMB, setSplitMB] = useState(0)
   const [writeRecovery, setWriteRecovery] = useState(false)
+  const [independent, setIndependent] = useState(false)
+  const [packJobs, setPackJobs] = useState<{ source: string; ok: boolean; error?: string; outputs?: string[] }[]>([])
+  const [lastPackFailed, setLastPackFailed] = useState(0)
 
   // 解包态
   const [unpackFile, setUnpackFile] = useState('')
@@ -95,8 +99,11 @@ export const PackPage: React.FC<{
     setProgressPct(5)
     setProgressText('正在提交打包任务…')
     setResultSummary('')
+    setPackJobs([])
+    setLastPackFailed(0)
 
     const startRes = await backend.startPack({
+      independent,
       sources,
       outDir: out,
       archiveName: archiveName.trim() || 'KKTools_Pack',
@@ -114,7 +121,7 @@ export const PackPage: React.FC<{
       return
     }
 
-    const done = await waitTask<{ outputs: string[]; outDir: string; recoveryFile: string }>(
+    const done = await waitTask<{ outputs: string[]; outDir: string; recoveryFile: string; jobs?: typeof packJobs; failed?: number }>(
       startRes.data.taskId,
       (st) => {
         setProgressPct(st.percent)
@@ -130,9 +137,12 @@ export const PackPage: React.FC<{
     }
 
     setLastResultDir(done.data.outDir)
-    const msg = `打包完成：生成 ${done.data.outputs.length} 个产物${done.data.recoveryFile ? '（含恢复记录）' : ''}`
+    setPackJobs(done.data.jobs || [])
+    const failed = done.data.failed || 0
+    setLastPackFailed(failed)
+    const msg = `打包${failed ? '结束' : '完成'}：生成 ${done.data.outputs.length} 个产物${failed ? ` · ${failed} 项失败` : ''}${writeRecovery ? '（附带恢复记录）' : ''}`
     setResultSummary(msg)
-    onNotify(msg, 'ok')
+    onNotify(msg, failed ? 'warn' : 'ok')
     onLog('ok', 'PACK', `${msg} -> ${done.data.outDir}`)
   }
 
@@ -199,6 +209,7 @@ export const PackPage: React.FC<{
               [
                 { id: 'pack', label: '打包成分享包', icon: Archive },
                 { id: 'unpack', label: '解包 / 还原分卷', icon: PackageOpen },
+                { id: 'recovery', label: '校验与修复', icon: ShieldCheck },
               ] as const
             ).map(({ id, label, icon: Icon }) => {
               const active = mode === id
@@ -299,6 +310,23 @@ export const PackPage: React.FC<{
               {/* 右侧打包配置 */}
               <section className="kk-surface flex flex-col justify-between gap-4 p-5">
                 <div className="flex flex-col gap-3.5">
+                  <label className="kk-surface-alt flex cursor-pointer items-center justify-between gap-3 px-3.5 py-2.5 text-[12.5px]">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-medium" style={{ color: 'var(--text-strong)' }}>
+                        每项单独打包
+                      </span>
+                      <span className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                        按各自文件名独立生成产物，共用伪装、密码与分卷设置
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={independent}
+                      disabled={running}
+                      onChange={(e) => setIndependent(e.target.checked)}
+                      className="h-4 w-4 shrink-0 accent-[var(--primary)]"
+                    />
+                  </label>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <label className="flex flex-col gap-1">
                       <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
@@ -307,6 +335,7 @@ export const PackPage: React.FC<{
                       <input
                         type="text"
                         value={archiveName}
+                        disabled={independent || running}
                         onChange={(e) => setArchiveName(e.target.value)}
                         className="kk-input text-[12.5px]"
                       />
@@ -432,17 +461,10 @@ export const PackPage: React.FC<{
                     />
                   </label>
 
-                  {uiMode === 'advanced' && (
-                    <label className="flex cursor-pointer items-center gap-2 text-[12.5px]" style={{ color: 'var(--text)' }}>
-                      <input
-                        type="checkbox"
-                        checked={writeRecovery}
-                        onChange={(e) => setWriteRecovery(e.target.checked)}
-                        className="h-3.5 w-3.5 accent-[var(--primary)]"
-                      />
-                      <span>附带恢复校验记录（.kkrec sidecar）</span>
-                    </label>
-                  )}
+                  <label className="flex cursor-pointer items-center gap-2 text-[12.5px]" style={{ color: 'var(--text)' }}>
+                    <input type="checkbox" checked={writeRecovery} disabled={running} onChange={e => setWriteRecovery(e.target.checked)} className="h-3.5 w-3.5 accent-[var(--primary)]" />
+                    <span>附带校验与尾部恢复记录（请与产物一起保留）</span>
+                  </label>
                 </div>
 
                 <button
@@ -456,7 +478,7 @@ export const PackPage: React.FC<{
                 </button>
               </section>
             </div>
-          ) : (
+          ) : mode === 'recovery' ? <RecoveryPanel onNotify={onNotify} onLog={onLog} /> : (
             <section className="kk-surface flex flex-col gap-4 p-5">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
@@ -541,11 +563,64 @@ export const PackPage: React.FC<{
           )}
         </div>
 
-        {/* 进度与结果反馈条 */}
-        {(running || resultSummary) && (
+        {mode === 'pack' && packJobs.length > 0 && (
+          <div className="kk-surface flex max-h-[240px] flex-col gap-2 overflow-y-auto p-4 text-[12px]">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold" style={{ color: 'var(--text-strong)' }}>
+                逐项打包结果 ({packJobs.length})
+              </span>
+              {lastPackFailed > 0 && (
+                <span className="text-[11.5px] font-medium" style={{ color: 'var(--danger)' }}>
+                  {lastPackFailed} 项失败
+                </span>
+              )}
+            </div>
+            {packJobs.map((j, i) => (
+              <div
+                key={i}
+                className="flex flex-col gap-1 rounded-[var(--radius-sm)] px-3 py-2"
+                style={{
+                  backgroundColor: j.ok ? 'var(--surface-alt)' : 'var(--danger-soft)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div className="flex items-center gap-1.5 break-all">
+                  <span
+                    className="shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold"
+                    style={{
+                      backgroundColor: j.ok ? 'var(--success-soft)' : 'var(--surface)',
+                      color: j.ok ? 'var(--success)' : 'var(--danger)',
+                    }}
+                  >
+                    {j.ok ? '已完成' : '失败'}
+                  </span>
+                  <span className="font-mono-num" style={{ color: 'var(--text-strong)' }}>
+                    {j.source}
+                  </span>
+                </div>
+                <div
+                  className="font-mono-num whitespace-pre-line break-all text-[11.5px]"
+                  style={{ color: j.ok ? 'var(--text-muted)' : 'var(--danger)' }}
+                >
+                  {j.ok ? j.outputs?.join('\n') : j.error}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* 进度与结果反馈条（仅在打包 / 解包页签显示） */}
+        {mode !== 'recovery' && (running || resultSummary) && (
           <div className="kk-surface flex flex-col gap-2 p-4 text-[12.5px]">
             <div className="flex items-center justify-between gap-2">
-              <span style={{ color: running ? 'var(--text-strong)' : 'var(--success)' }}>
+              <span
+                style={{
+                  color: running
+                    ? 'var(--text-strong)'
+                    : lastPackFailed > 0 && mode === 'pack'
+                      ? 'var(--warning)'
+                      : 'var(--success)',
+                }}
+              >
                 {running ? progressText : resultSummary}
               </span>
               {running ? (
@@ -594,6 +669,7 @@ export const SharePage: React.FC<{
   const [pkgDir, setPkgDir] = useState('')
   const [cardTarget, setCardTarget] = useState('')
   const [modTarget, setModTarget] = useState('')
+  const [autoRoute, setAutoRoute] = useState(false)
 
   // 目录整理态
   const [orgSrc, setOrgSrc] = useState('')
@@ -839,7 +915,7 @@ export const SharePage: React.FC<{
                       value={exportOutDir}
                       onChange={(e) => setExportOutDir(e.target.value)}
                       placeholder="选择输出目录"
-                      className="kk-input flex-1 text-[12.5px]"
+                      className="kk-input h-9 flex-1 text-[12.5px]"
                     />
                     <button
                       type="button"
@@ -847,22 +923,27 @@ export const SharePage: React.FC<{
                         const r = await backend.pickDirectory('选择分享包输出目录', exportOutDir)
                         if (r.ok && r.data) setExportOutDir(r.data)
                       }}
-                      className="kk-btn px-2.5"
+                      className="kk-btn h-9 px-2.5"
                     >
                       <FolderOpen size={14} />
                     </button>
                   </div>
                 </div>
 
-                <label className="kk-surface-alt flex cursor-pointer items-center justify-between px-3.5 py-2.5 text-[13px]">
-                  <span style={{ color: 'var(--text-strong)' }}>按角色分文件夹归类</span>
-                  <input
-                    type="checkbox"
-                    checked={groupByChar}
-                    onChange={(e) => setGroupByChar(e.target.checked)}
-                    className="h-4 w-4 accent-[var(--primary)]"
-                  />
-                </label>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                    归类方式
+                  </span>
+                  <label className="kk-surface-alt flex h-9 cursor-pointer items-center justify-between rounded-[var(--radius-sm)] px-3 text-[12.5px]">
+                    <span style={{ color: 'var(--text-strong)' }}>按角色分文件夹归类</span>
+                    <input
+                      type="checkbox"
+                      checked={groupByChar}
+                      onChange={(e) => setGroupByChar(e.target.checked)}
+                      className="h-4 w-4 accent-[var(--primary)]"
+                    />
+                  </label>
+                </div>
               </div>
 
               <label className="flex flex-col gap-1">
@@ -894,11 +975,30 @@ export const SharePage: React.FC<{
 
           {tab === 'import' && (
             <section className="kk-surface flex flex-col gap-4 p-5">
+              <label className="kk-surface-alt flex cursor-pointer items-center justify-between gap-3 px-3.5 py-2.5 text-[13px]">
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-medium" style={{ color: 'var(--text-strong)' }}>
+                    自动归位到已配置的游戏目录
+                  </span>
+                  <span className="text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                    开启后先预览各文件目标路径，确认后再按版本与分类安全复制
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={autoRoute}
+                  disabled={running}
+                  onChange={(e) => setAutoRoute(e.target.checked)}
+                  className="h-4 w-4 shrink-0 accent-[var(--primary)]"
+                />
+              </label>
               {(
                 [
                   { label: '分享包所在目录', val: pkgDir, set: setPkgDir },
-                  { label: '角色卡还原目标目录（如 UserData/chara/female）', val: cardTarget, set: setCardTarget },
-                  { label: 'Mod 还原目标目录（可选，如游戏 mods 目录）', val: modTarget, set: setModTarget },
+                  ...(!autoRoute ? [
+                    { label: '角色卡还原目标目录（如 UserData/chara/female）', val: cardTarget, set: setCardTarget },
+                    { label: 'Mod 还原目标目录（可选，如游戏 mods 目录）', val: modTarget, set: setModTarget },
+                  ] : []),
                 ] as const
               ).map((item) => (
                 <div key={item.label} className="flex flex-col gap-1.5">
@@ -925,7 +1025,7 @@ export const SharePage: React.FC<{
                   </div>
                 </div>
               ))}
-              <div className="flex justify-end">
+              {autoRoute ? <AutoImportPanel pkgDir={pkgDir.trim()} onNotify={onNotify} onLog={onLog} /> : <div className="flex justify-end">
                 <button
                   type="button"
                   disabled={running}
@@ -935,7 +1035,7 @@ export const SharePage: React.FC<{
                   <FolderInput size={14} />
                   <span>{running ? '还原导入中…' : '开始导入分享包'}</span>
                 </button>
-              </div>
+              </div>}
             </section>
           )}
 
@@ -1345,40 +1445,94 @@ export const ScenePage: React.FC<{
   extracting: boolean
   onPickScene: () => void
   onExtractCharacters: () => void
-}> = ({ scene, analyzing, extracting, onPickScene, onExtractCharacters }) => {
+  onNotify?: (msg: string, tone?: 'info' | 'ok' | 'warn' | 'error') => void
+  onLog?: (level: LogEntry['level'], source: string, msg: string) => void
+}> = ({ scene, analyzing, extracting, onPickScene, onExtractCharacters, onNotify, onLog }) => {
+  const [lastExportPath, setLastExportPath] = useState('')
+
+  useEffect(() => {
+    setLastExportPath('')
+  }, [scene?.path])
+
   return (
     <div className="flex h-full flex-col gap-4 overflow-hidden px-5 py-4">
-      <div className="kk-surface flex shrink-0 flex-wrap items-center justify-between gap-2 p-4">
-        <div>
-          <div className="text-[14px] font-bold" style={{ color: 'var(--text-strong)' }}>
-            Studio 场景卡解析与角色提取
+      <div className="kk-surface flex shrink-0 flex-col gap-3 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-[14px] font-bold" style={{ color: 'var(--text-strong)' }}>
+              Studio 场景卡解析与角色提取
+            </div>
+            <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+              解析场景卡内嵌的所有角色卡与引用 Mod 清单，支持无损分离提取为独立 PNG
+            </div>
           </div>
-          <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
-            解析场景卡内嵌的所有角色卡与引用 Mod 清单，支持无损分离提取为独立 PNG
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {scene && scene.characterCount > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {scene && (
+              <>
+                <DataExportButton
+                  kind="scene"
+                  paths={[scene.path]}
+                  format="json"
+                  label="导出 JSON"
+                  disabled={analyzing || extracting}
+                  className="kk-btn"
+                  onExported={setLastExportPath}
+                  onNotify={onNotify}
+                  onLog={onLog}
+                />
+                <DataExportButton
+                  kind="scene"
+                  paths={[scene.path]}
+                  format="txt"
+                  label="导出 TXT"
+                  disabled={analyzing || extracting}
+                  className="kk-btn"
+                  onExported={setLastExportPath}
+                  onNotify={onNotify}
+                  onLog={onLog}
+                />
+              </>
+            )}
+            {scene && scene.characterCount > 0 && (
+              <button
+                type="button"
+                disabled={extracting}
+                onClick={onExtractCharacters}
+                className="kk-btn"
+              >
+                <Download size={14} />
+                <span>{extracting ? '提取中…' : `一键提取全部角色 (${scene.characterCount})`}</span>
+              </button>
+            )}
             <button
               type="button"
-              disabled={extracting}
-              onClick={onExtractCharacters}
-              className="kk-btn"
+              disabled={analyzing}
+              onClick={onPickScene}
+              className="kk-btn kk-btn-primary"
             >
-              <Download size={14} />
-              <span>{extracting ? '提取中…' : `一键提取全部角色 (${scene.characterCount})`}</span>
+              <Clapperboard size={14} />
+              <span>{analyzing ? '解析中…' : '选择场景卡 PNG'}</span>
             </button>
-          )}
-          <button
-            type="button"
-            disabled={analyzing}
-            onClick={onPickScene}
-            className="kk-btn kk-btn-primary"
-          >
-            <Clapperboard size={14} />
-            <span>{analyzing ? '解析中…' : '选择场景卡 PNG'}</span>
-          </button>
+          </div>
         </div>
+
+        {lastExportPath && (
+          <div
+            className="kk-surface-alt flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-[12px]"
+          >
+            <span className="font-mono-num truncate" style={{ color: 'var(--success)' }}>
+              资料已导出：{lastExportPath}
+            </span>
+            <button
+              type="button"
+              onClick={() => void backend.revealInExplorer(lastExportPath)}
+              className="kk-btn h-7 shrink-0 px-2.5 text-[11.5px]"
+            >
+              <ExternalLink size={12} />
+              <span>查看文件</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {!scene ? (

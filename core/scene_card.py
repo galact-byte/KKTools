@@ -71,6 +71,8 @@ def _parse_embedded(data: bytes, marker_full_start: int) -> KoikatuCard | None:
                            int(info["pos"]), int(info["size"]))
         except (KeyError, TypeError, ValueError):
             return None
+        if bi.pos < 0 or bi.size < 0 or bi.pos + bi.size > len(blob):
+            return None
         block_order.append(bi)
         blocks[bi.name] = blob[bi.pos : bi.pos + bi.size]
 
@@ -172,19 +174,19 @@ def extract_scene_mod_ids(data: bytes, *, strict: bool = False) -> dict[str, int
     return out
 
 
-def analyze_scene(scene_path: str | Path) -> dict:
+def analyze_scene(scene_path: str | Path, *, strict: bool = False) -> dict:
     """分析场景卡：内嵌角色名单 + 聚合的 mod 依赖（内嵌角色 + 场景级 studio 道具）。"""
     data = Path(scene_path).read_bytes()
-    cards = find_embedded_characters(data)
+    cards = find_embedded_characters(data, strict=strict)
     characters = []
     all_mods: dict[str, int] = {}
     for card in cards:
-        mods = extract_mod_ids(card)
+        mods = extract_mod_ids(card, strict=strict)
         for g, n in mods.items():
             all_mods[g] = all_mods.get(g, 0) + n
         characters.append({"name": _chara_name(card), "game": card.game, "mods": len(mods)})
     # 场景级 studio 道具依赖
-    scene_mods = extract_scene_mod_ids(data)
+    scene_mods = extract_scene_mod_ids(data, strict=strict)
     for g, n in scene_mods.items():
         all_mods[g] = all_mods.get(g, 0) + n
     return {

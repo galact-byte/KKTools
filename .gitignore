@@ -50,3 +50,7 @@ web/*.tsbuildinfo
 
 # 交付构建配置
 !KKTools.spec
+
+# 本机卡片标签数据
+/card_tags.sqlite3
+/card_tags.sqlite3-*

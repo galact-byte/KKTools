@@ -31,6 +31,7 @@ export interface CardSummary {
   game: string
   name: string
   thumbnailUrl: string
+  tags?: string[]
   isDemo?: boolean
   subtitle?: string
   personalityLabel?: string

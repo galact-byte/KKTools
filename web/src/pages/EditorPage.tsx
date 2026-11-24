@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Check,
   Code2,
   Copy,
+  ExternalLink,
   FilePlus2,
   FolderOpen,
   Heart,
@@ -21,7 +22,9 @@ import {
   DENIAL_LABELS,
   KK_PERSONALITIES,
 } from '../data/constants'
-import type { CardDetail, CardModCheckResult } from '../types/kk'
+import { DataExportButton } from '../components/WorkflowTools'
+import { backend } from '../lib/bridge'
+import type { CardDetail, CardModCheckResult, LogEntry } from '../types/kk'
 
 interface EditorPageProps {
   card: CardDetail | null
@@ -39,6 +42,8 @@ interface EditorPageProps {
   onReset: () => void
   onCopyModIds: () => void
   onCheckCardMods: () => void
+  onNotify?: (msg: string, tone?: 'info' | 'ok' | 'warn' | 'error') => void
+  onLog?: (level: LogEntry['level'], source: string, msg: string) => void
 }
 
 type EditorTab = 'profile' | 'traits' | 'mods' | 'raw'
@@ -59,8 +64,15 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   onReset,
   onCopyModIds,
   onCheckCardMods,
+  onNotify,
+  onLog,
 }) => {
   const [tab, setTab] = useState<EditorTab>('profile')
+  const [lastExportJson, setLastExportJson] = useState('')
+
+  useEffect(() => {
+    setLastExportJson('')
+  }, [card?.path])
 
   const fullName = useMemo(() => {
     if (!card) return ''
@@ -352,6 +364,33 @@ export const EditorPage: React.FC<EditorPageProps> = ({
               <span>还原改动</span>
             </button>
           </div>
+          {!card.isDemo && (
+            <div className="flex items-center gap-1.5">
+              <DataExportButton
+                kind="character"
+                paths={[card.path]}
+                format="json"
+                label="导出已保存档案 JSON"
+                title={dirty ? '请先保存或还原改动后再导出档案' : '将当前已保存的角色档案导出为 JSON'}
+                disabled={saving || dirty}
+                className="kk-btn flex-1 py-1.5 text-[12px]"
+                onExported={setLastExportJson}
+                onNotify={onNotify}
+                onLog={onLog}
+              />
+              {lastExportJson && (
+                <button
+                  type="button"
+                  onClick={() => void backend.revealInExplorer(lastExportJson)}
+                  title={`在资源管理器中定位：${lastExportJson}`}
+                  aria-label="查看导出的 JSON 文件"
+                  className="kk-btn shrink-0 px-2.5 py-1.5 text-[12px]"
+                >
+                  <ExternalLink size={13} />
+                </button>
+              )}
+            </div>
+          )}
           {!inModal && (
             <button
               type="button"

@@ -13,8 +13,9 @@ import {
   Sparkles,
   X,
 } from 'lucide-react'
+import { CardTagEditor, DataExportButton } from '../components/WorkflowTools'
 import { TYPE_META } from '../data/constants'
-import type { CardSummary, CardType } from '../types/kk'
+import type { CardSummary, CardType, LogEntry } from '../types/kk'
 
 interface BrowserPageProps {
   cards: CardSummary[]
@@ -31,7 +32,10 @@ interface BrowserPageProps {
   onLoadDemo: () => void
   onQuickEditCard: (card: CardSummary) => void
   onInspectScene: (card: CardSummary) => void
+  onTagsSaved: (path: string, tags: string[]) => void
   onRevealFile: (path: string) => void
+  onNotify?: (msg: string, tone?: 'info' | 'ok' | 'warn' | 'error') => void
+  onLog?: (level: LogEntry['level'], source: string, msg: string) => void
 }
 
 type GridDensity = 'compact' | 'standard' | 'large'
@@ -52,12 +56,16 @@ export const BrowserPage: React.FC<BrowserPageProps> = ({
   onQuickEditCard,
   onInspectScene,
   onRevealFile,
+  onTagsSaved,
+  onNotify,
+  onLog,
 }) => {
   const [typeFilter, setTypeFilter] = useState<'all' | CardType>('all')
   const [gameFilter, setGameFilter] = useState<string>('all')
   const [keyword, setKeyword] = useState('')
   const [density, setDensity] = useState<GridDensity>('standard')
   const [selectedId, setSelectedId] = useState<string | null>(cards[0]?.id ?? null)
+  const [lastExportCsv, setLastExportCsv] = useState('')
 
   // 仅当当前结果同时存在多个有效游戏版本（如 KK + KKS）时才显示版本筛选胶囊
   const gameOptions = useMemo(() => {
@@ -105,7 +113,8 @@ export const BrowserPage: React.FC<BrowserPageProps> = ({
         card.name.toLowerCase().includes(q) ||
         card.fileName.toLowerCase().includes(q) ||
         card.game.toLowerCase().includes(q) ||
-        (card.personalityLabel ?? '').toLowerCase().includes(q)
+        (card.personalityLabel ?? '').toLowerCase().includes(q) ||
+        (card.tags || []).some(t => t.toLowerCase().includes(q))
       )
     })
   }, [cards, effectiveGameFilter, typeFilter, keyword])
@@ -313,8 +322,8 @@ export const BrowserPage: React.FC<BrowserPageProps> = ({
                 type="text"
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
-                placeholder="筛选角色名 / 文件名..."
-                className="kk-input h-8 py-1 pl-8 pr-7 text-[12.5px]"
+                placeholder="名称 / 文件名 / 标签"
+                className="kk-input h-8 py-1 pl-8 pr-7 text-[12px]"
               />
               {keyword && (
                 <button
@@ -328,6 +337,33 @@ export const BrowserPage: React.FC<BrowserPageProps> = ({
                 </button>
               )}
             </div>
+
+            {!isDemoMode && filtered.some((c) => !c.isDemo) && (
+              <div className="flex items-center gap-1">
+                <DataExportButton
+                  kind="list"
+                  paths={filtered.filter((c) => !c.isDemo).map((c) => c.path)}
+                  format="csv"
+                  label="导出 CSV"
+                  title="导出当前筛选结果列表为 CSV"
+                  className="kk-btn h-8 shrink-0 px-2 text-[12px]"
+                  onExported={setLastExportCsv}
+                  onNotify={onNotify}
+                  onLog={onLog}
+                />
+                {lastExportCsv && (
+                  <button
+                    type="button"
+                    onClick={() => onRevealFile(lastExportCsv)}
+                    title={`在资源管理器中定位：${lastExportCsv}`}
+                    aria-label="在资源管理器中定位导出的 CSV"
+                    className="kk-btn h-8 shrink-0 px-2 text-[12px]"
+                  >
+                    <ExternalLink size={13} />
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* 网格密度 */}
             <div
@@ -516,6 +552,33 @@ export const BrowserPage: React.FC<BrowserPageProps> = ({
                           </span>
                         )}
                       </div>
+                      {card.tags && card.tags.length > 0 && (
+                        <div className="mt-0.5 flex flex-nowrap items-center gap-1 overflow-hidden">
+                          {(card.tags.length > 2 ? card.tags.slice(0, 1) : card.tags).map((tag) => (
+                            <span
+                              key={tag}
+                              className="min-w-0 truncate rounded-full px-1.5 py-[1px] text-[10px] font-medium"
+                              style={{
+                                backgroundColor: 'var(--primary-soft)',
+                                color: 'var(--primary)',
+                              }}
+                            >
+                              #{tag}
+                            </span>
+                          ))}
+                          {card.tags.length > 2 && (
+                            <span
+                              className="font-mono-num shrink-0 rounded-full px-1.5 py-[1px] text-[10px]"
+                              style={{
+                                backgroundColor: 'var(--surface-alt)',
+                                color: 'var(--text-dim)',
+                              }}
+                            >
+                              +{card.tags.length - 1}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )
@@ -644,6 +707,16 @@ export const BrowserPage: React.FC<BrowserPageProps> = ({
                   </span>
                 </div>
               </div>
+
+              {!selectedCard.isDemo && (
+                <CardTagEditor
+                  key={selectedCard.path}
+                  path={selectedCard.path}
+                  onSaved={(tags) => onTagsSaved(selectedCard.path, tags)}
+                  onNotify={onNotify}
+                  onLog={onLog}
+                />
+              )}
             </div>
 
             {/* 底部操作区 */}

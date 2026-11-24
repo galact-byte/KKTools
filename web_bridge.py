@@ -24,6 +24,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core import (
+    catalog,
+    auto_import,
+    recovery,
     card_scan,
     kk_card,
     kk_fields,
@@ -202,6 +205,9 @@ class KKToolsBridge:
     def __init__(self) -> None:
         self._active_saves = 0
         self._save_lock = threading.Lock()
+        self._pack_lock = threading.Lock()
+        self._import_lock = threading.Lock()
+        self._import_preview: tuple[str, str, dict] | None = None
         self._window = None
         self._tasks = _TaskManager()
         self._mod_index: mod_index.ModIndex | None = None
@@ -474,6 +480,7 @@ class KKToolsBridge:
                 return _err(f"目录不存在：{directory}")
             items = card_scan.scan_dir(d, recursive=bool(recursive))
             out: list[dict[str, Any]] = []
+            tags = catalog.all_tags()
             for idx, item in enumerate(items):
                 p = Path(item.path)
                 out.append(
@@ -486,6 +493,7 @@ class KKToolsBridge:
                         "name": item.name,
                         "thumbnailUrl": _bytes_to_data_url(item.thumbnail, "image/png"),
                         "isDemo": False,
+                        "tags": tags.get(os.path.normcase(str(p.resolve())), []),
                     }
                 )
             settings.set_value("last_browse_dir", str(d))
@@ -625,7 +633,13 @@ class KKToolsBridge:
                     idx += 1
                 saved = card.save(out_path, backup=False)
 
-            return _ok({"savedPath": str(saved)})
+            warning = ''
+            if not overwrite:
+                try:
+                    catalog.set_tags(saved, catalog.get_tags(src))
+                except Exception as exc:
+                    warning = f'角色卡已保存，但标签未复制：{exc}'
+            return _ok({"savedPath": str(saved), "warning": warning})
         except Exception as exc:  # noqa: BLE001
             return _err(f"保存角色卡失败：{exc}")
         finally:
@@ -649,7 +663,7 @@ class KKToolsBridge:
         if not str(opts.get("outDir") or "").strip():
             return _err("请选择输出目录")
 
-        def job(report: Callable[[int, int, str], None]) -> dict[str, Any]:
+        def pack_one(sources, archive_name, report) -> dict[str, Any]:
             out_dir.mkdir(parents=True, exist_ok=True)
             settings.set_value("pack_out_dir", str(out_dir))
 
@@ -665,7 +679,17 @@ class KKToolsBridge:
                         raise ValueError("启用伪装模式时请先选择载体文件，或在设置中配置载体目录")
 
             ext = carrier.suffix if carrier is not None else ".zip"
-            out_file = out_dir / (archive_name if archive_name.endswith(ext) else f"{archive_name}{ext}")
+            safe_name = share._safe_group_name(archive_name)
+            base_name = safe_name if safe_name.endswith(ext) else f"{safe_name}{ext}"
+            out_file = catalog.unique_path(out_dir, base_name)
+            number = 2
+            while (stego.recovery_sidecar_path(out_file).exists()
+                   or out_file.with_suffix(out_file.suffix + '.kkseal.json').exists()
+                   or any(p.name.startswith(out_file.name + '.')
+                          and p.name[len(out_file.name) + 1:].removesuffix('.kkrec.json').isdigit()
+                          for p in out_dir.iterdir())):
+                out_file = catalog.unique_path(out_dir, f'{Path(base_name).stem} ({number}){ext}')
+                number += 1
             pack_source: Any = sources[0] if (len(sources) == 1 and sources[0].is_dir()) else sources
 
             def _prog(cur: int, tot: int, name: str = "") -> None:
@@ -679,6 +703,7 @@ class KKToolsBridge:
                         passwords,
                         carrier=carrier,
                         progress=_prog,
+                        exclude_dirs=[out_dir],
                     )
                 )
             elif carrier is not None:
@@ -689,6 +714,7 @@ class KKToolsBridge:
                         out_file,
                         password=passwords[0] if passwords else None,
                         progress=_prog,
+                        exclude_dirs=[out_dir],
                     )
                 )
             else:
@@ -698,6 +724,7 @@ class KKToolsBridge:
                         out_file,
                         password=passwords[0] if passwords else None,
                         progress=_prog,
+                        exclude_dirs=[out_dir],
                     )
                 )
 
@@ -708,16 +735,38 @@ class KKToolsBridge:
                 if parts:
                     outputs = [str(x) for x in parts]
 
-            recovery_file = ""
+            recovery_file = ''
+            recovery_files = []
             if write_recovery:
-                report(94, 100, "正在生成恢复校验 sidecar…")
-                recovery_file = str(stego.write_recovery_sidecar(produced))
+                report(94, 100, '正在生成校验与尾部恢复记录…')
+                recovery_files = [stego.write_recovery_sidecar(p, redundancy=True) for p in dict.fromkeys([str(produced), *outputs])]
+                recovery_file = recovery_files[0]
 
             return {
                 "outputs": outputs,
                 "outDir": str(out_dir),
                 "recoveryFile": recovery_file,
+                "recoveryFiles": recovery_files,
             }
+
+        def job(report):
+            with self._pack_lock:
+                if not opts.get('independent'):
+                    return pack_one(sources, archive_name, report)
+                jobs = []
+                for i, source in enumerate(sources):
+                    def step(cur, total, text='', number=i, name=source.name):
+                        report(number * 100 + (int(cur * 100 / total) if total else 0),
+                               len(sources) * 100, f'{number+1}/{len(sources)} {name}：{text}')
+                    try:
+                        result = pack_one([source], source.name if source.is_dir() else source.stem, step)
+                        jobs.append({'source': str(source), 'ok': True, **result})
+                    except Exception as exc:
+                        jobs.append({'source': str(source), 'ok': False, 'error': str(exc)})
+                    report((i+1)*100, len(sources)*100, f'已处理 {i+1}/{len(sources)} 项')
+                return {'outDir': str(out_dir), 'jobs': jobs,
+                        'outputs': [p for j in jobs if j['ok'] for p in j['outputs']],
+                        'recoveryFile': '', 'failed': sum(not j['ok'] for j in jobs)}
 
         return _ok({"taskId": self._tasks.start(job)})
 
@@ -750,7 +799,13 @@ class KKToolsBridge:
                     # join_parts 内置严格卷号连续校验，缺卷直接抛异常中止
                     target = Path(stego.join_parts(input_path, temp_joined))
 
-                layers = stego.read_seal_layers(target)
+                # 合并文件位于临时目录，层数记录仍跟随原产物名。
+                seal_source = input_path.with_suffix('') if is_part else input_path
+                layers = stego.read_seal_layers(seal_source)
+                if layers is None and stego.has_layered_payload(target, passwords):
+                    if len(passwords) < 2:
+                        raise ValueError('识别到多层加密包，请按打包顺序提供完整的多层密码')
+                    layers = len(passwords)
                 report(35, 100, "正在解包提取文件…")
 
                 def _prog(cur: int, tot: int, name: str = "") -> None:
@@ -779,6 +834,71 @@ class KKToolsBridge:
                         pass
 
         return _ok({"taskId": self._tasks.start(job)})
+
+    def get_card_tags(self, path: str) -> dict:
+        try:
+            return _ok(catalog.get_tags(path))
+        except Exception as exc:
+            return _err(str(exc))
+
+    def set_card_tags(self, path: str, tags: list[str]) -> dict:
+        try:
+            return _ok(catalog.set_tags(path, tags))
+        except Exception as exc:
+            return _err(str(exc))
+
+    def start_export_data(self, opts: dict) -> dict:
+        if not str(opts.get('outDir') or '').strip():
+            return _err('请选择导出目录')
+        def job(report):
+            report(0, 1, '正在导出资料…')
+            result = catalog.export_data(str(opts.get('kind')), opts.get('paths') or [],
+                                         Path(opts['outDir']), str(opts.get('format') or 'json'))
+            return {'path': str(result)}
+        return _ok({'taskId': self._tasks.start(job)})
+
+    def preview_auto_import(self, pkg_dir: str, fallback_game: str = '') -> dict:
+        with self._import_lock:
+            self._import_preview = None
+            try:
+                plan = auto_import.plan_import(pkg_dir, fallback_game)
+                self._import_preview = (str(Path(pkg_dir).resolve()), fallback_game, plan)
+                return _ok(plan)
+            except Exception as exc:
+                return _err(str(exc))
+
+    def start_auto_import(self, pkg_dir: str, fallback_game: str = '') -> dict:
+        with self._import_lock:
+            try:
+                preview = self._import_preview
+                self._import_preview = None
+                if preview is None or preview[:2] != (str(Path(pkg_dir).resolve()), fallback_game):
+                    return _err('请先预览当前分享包及目标游戏，再确认自动归位')
+                plan = preview[2]
+                auto_import.validate_plan(plan)
+                if not plan['files']:
+                    return _err('没有可导入的文件，请先检查预览中的跳过原因')
+                def job(report):
+                    with self._import_lock:
+                        return auto_import.apply_import(plan, report)
+                return _ok({'taskId': self._tasks.start(job)})
+            except Exception as exc:
+                return _err(str(exc))
+
+    def start_recovery(self, opts: dict) -> dict:
+        path = Path(str(opts.get('path') or ''))
+        sidecar = Path(str(opts.get('sidecar'))) if opts.get('sidecar') else stego.recovery_sidecar_path(path)
+        if not path.is_file():
+            return _err('请选择待校验或修复的文件')
+        if opts.get('repair') and not str(opts.get('outDir') or '').strip():
+            return _err('请选择修复副本的保存目录')
+        def job(report):
+            report(0, 1, '正在校验恢复记录…')
+            if opts.get('repair'):
+                result = recovery.repair_tail(path, sidecar, Path(opts['outDir']))
+                return {'ok': True, 'path': str(result), 'reason': '修复副本整文件校验通过'}
+            return stego.verify_recovery(path, sidecar)
+        return _ok({'taskId': self._tasks.start(job)})
 
     # ---- 分享与整理（core.share） ----
 

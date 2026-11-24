@@ -30,14 +30,21 @@ ProgressCb = Callable[[int, int, str], None]  # (当前, 总数, 描述)
 PackSource = str | Path | Iterable[str | Path]
 
 
-def _pack_members(source: PackSource, out_path: Path) -> list[tuple[Path, str]]:
+def _pack_members(
+    source: PackSource, out_path: Path, *, exclude_dirs: Iterable[str | Path] = (),
+) -> list[tuple[Path, str]]:
     """在创建输出文件前确定全部成员及其包内路径。"""
     if isinstance(source, (str, Path)):
         folder = Path(source)
         if not folder.is_dir():
             raise FileNotFoundError(f"待打包文件夹不存在: {folder}")
+        root = folder.resolve()
+        excluded = [Path(p).resolve() for p in exclude_dirs if Path(p).resolve().is_relative_to(root)]
+        if root in excluded:
+            raise ValueError("输出目录不能与待打包目录相同，请选择独立的输出目录")
         members = [(p, p.relative_to(folder).as_posix())
-                   for p in folder.rglob("*") if p.is_file()]
+                   for p in folder.rglob("*") if p.is_file()
+                   and not any(p.resolve().is_relative_to(d) for d in excluded)]
     else:
         members = [(Path(p), Path(p).name) for p in source]
         if not members:
@@ -62,10 +69,11 @@ def pack_folder(
     compress: bool = True,
     password: str | None = None,
     progress: ProgressCb | None = None,
+    exclude_dirs: Iterable[str | Path] = (),
 ) -> str:
     """把文件夹或指定文件打包成 zip；给 password 则用 AES-256 加密。"""
     out_zip = Path(out_zip)
-    members = _pack_members(folder, out_zip)
+    members = _pack_members(folder, out_zip, exclude_dirs=exclude_dirs)
     total = len(members)
     if password:
         if not HAVE_PYZIPPER:
@@ -130,18 +138,20 @@ def pack_and_disguise(
     *,
     password: str | None = None,
     progress: ProgressCb | None = None,
+    exclude_dirs: Iterable[str | Path] = (),
 ) -> str:
     """打包文件夹或指定文件并伪装成载体文件。"""
     out_path = Path(out_path)
     if Path(carrier).resolve() == out_path.resolve():
         raise ValueError("输出路径不能覆盖载体文件")
     folder = list(folder) if not isinstance(folder, (str, Path)) else folder
-    _pack_members(folder, out_path)
+    exclude_dirs = tuple(exclude_dirs)
+    _pack_members(folder, out_path, exclude_dirs=exclude_dirs)
     tmp_zip = out_path.with_suffix(out_path.suffix + ".tmp.zip")
     if tmp_zip.exists():
         raise FileExistsError(f"临时打包路径已存在，请更换输出文件名: {tmp_zip}")
     try:
-        pack_folder(folder, tmp_zip, password=password, progress=progress)
+        pack_folder(folder, tmp_zip, password=password, progress=progress, exclude_dirs=exclude_dirs)
         disguise(carrier, tmp_zip, out_path)
     finally:
         if tmp_zip.exists():
@@ -301,6 +311,7 @@ def pack_layered(
     *,
     carrier: str | Path | None = None,
     progress: ProgressCb | None = None,
+    exclude_dirs: Iterable[str | Path] = (),
 ) -> str:
     """把文件夹或指定文件多重封缄为 N 层加密文件（N=len(passwords)）。
 
@@ -312,7 +323,8 @@ def pack_layered(
     out_path = Path(out_path)
     if carrier and Path(carrier).resolve() == out_path.resolve():
         raise ValueError("输出路径不能覆盖载体文件")
-    members = _pack_members(folder, out_path)
+    exclude_dirs = tuple(exclude_dirs)
+    members = _pack_members(folder, out_path, exclude_dirs=exclude_dirs)
     sidecar = seal_sidecar_path(out_path).resolve()
     if any(p.resolve() == sidecar for p, _ in members) or (carrier and Path(carrier).resolve() == sidecar):
         raise ValueError("封缄伴随文件不能覆盖待打包文件或载体")
@@ -326,7 +338,7 @@ def pack_layered(
     try:
         # 第 1 层：把文件夹打成加密 zip
         layer = tmpdir / "layer_1.kkz"
-        pack_folder(folder, layer, password=passwords[0], progress=progress)
+        pack_folder(folder, layer, password=passwords[0], progress=progress, exclude_dirs=exclude_dirs)
         if progress:
             progress(1, n, f"封缄第 1/{n} 层")
         # 第 2..N 层：把上一层 zip 当作唯一成员再加密
@@ -372,6 +384,23 @@ def read_seal_layers(path: str | Path) -> int | None:
         return n if n > 0 else None
     except (json.JSONDecodeError, OSError, ValueError, TypeError):
         return None
+
+
+def has_layered_payload(path: str | Path, passwords: list[str]) -> bool:
+    """缺少伴随记录时，校验固定内层成员的 ZIP 文件头，避免仅凭文件名误判。"""
+    zf_cls = pyzipper.AESZipFile if HAVE_PYZIPPER else zipfile.ZipFile
+    for password in [None, *passwords]:
+        try:
+            with zf_cls(path) as archive:
+                if archive.namelist() != [_SEAL_INNER_NAME]:
+                    return False
+                if password:
+                    archive.setpassword(password.encode('utf-8'))
+                with archive.open(_SEAL_INNER_NAME) as inner:
+                    return inner.read(4) in (b'PK\x03\x04', b'PK\x05\x06')
+        except (RuntimeError, zipfile.BadZipFile):
+            continue
+    return False
 
 
 def extract_layered(
@@ -488,8 +517,8 @@ def write_recovery_sidecar(
                     rec["members"].append({"name": info.filename, "sha256": digest, "size": info.file_size})
                     if progress:
                         progress(i, total, info.filename)
-        except (zipfile.BadZipFile, OSError):
-            pass  # 非标准 zip 就只保留整文件校验
+        except (zipfile.BadZipFile, OSError, RuntimeError, NotImplementedError):
+            pass  # 加密包仍保留整文件校验，不读取密码保护内容
 
     if redundancy:
         tail = min(64 * 1024, rec["size"])  # 末尾 64KB，覆盖中央目录
@@ -518,7 +547,11 @@ def verify_recovery(
         return {"ok": False, "reason": "缺少恢复清单文件", "bad_members": [], "can_repair_tail": False}
     try:
         rec = json.loads(sc.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+        if not isinstance(rec, dict) or rec.get('format') != 'kkrec' or rec.get('version') != 1:
+            raise ValueError('恢复记录格式不支持')
+        if not isinstance(rec.get('members'), list):
+            raise ValueError('恢复记录的成员列表无效')
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
         return {"ok": False, "reason": f"恢复清单损坏: {exc}", "bad_members": [], "can_repair_tail": False}
 
     if not path.is_file():
@@ -543,7 +576,7 @@ def verify_recovery(
                             with zf.open(name) as f:
                                 if _sha256_bytes(f.read()) != want[name]:
                                     bad.append(name)
-                        except (zipfile.BadZipFile, OSError, zlib.error):
+                        except (zipfile.BadZipFile, OSError, zlib.error, RuntimeError, NotImplementedError):
                             bad.append(name)  # 解压失败 = 该成员已损坏
                     if progress:
                         progress(i, total, name)

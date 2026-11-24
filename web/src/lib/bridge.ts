@@ -70,7 +70,18 @@ export async function waitTask<T>(
   }
 }
 
+export interface ImportPlan {
+  files: { source: string; target: string; game: string; type: string }[]
+  skipped: { source: string; reason: string }[]
+}
+
 export const backend = {
+  getCardTags: (path: string) => callBackend<string[]>('get_card_tags', path),
+  setCardTags: (path: string, tags: string[]) => callBackend<string[]>('set_card_tags', path, tags),
+  startExportData: (opts: { kind: 'list' | 'character' | 'scene'; paths: string[]; outDir: string; format: 'csv' | 'json' | 'txt' }) => callBackend<{ taskId: string }>('start_export_data', opts),
+  previewAutoImport: (path: string, game: string) => callBackend<ImportPlan>('preview_auto_import', path, game),
+  startAutoImport: (path: string, game: string) => callBackend<{ taskId: string }>('start_auto_import', path, game),
+  startRecovery: (opts: { path: string; sidecar: string; outDir: string; repair: boolean }) => callBackend<{ taskId: string }>('start_recovery', opts),
   recordLog: (level: string, source: string, message: string) => callBackend<void>('record_log', level, source, message),
   openLogDirectory: () => callBackend<string>('open_log_directory'),
   exportManifest: (path: string) => callBackend<{ count: number }>('export_manifest', path),
@@ -101,10 +112,11 @@ export const backend = {
     overwrite: boolean
     parameter: CardDetail['parameter']
     coverPath?: string
-  }) => callBackend<{ savedPath: string }>('save_card', payload),
+  }) => callBackend<{ savedPath: string; warning?: string }>('save_card', payload),
 
   // 打包与解包
   startPack: (opts: {
+    independent?: boolean
     sources: string[]
     outDir: string
     archiveName: string

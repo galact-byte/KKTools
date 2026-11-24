@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react'
 import { Maximize2, Sparkles, X } from 'lucide-react'
 import { EditorPage } from '../pages/EditorPage'
-import type { CardDetail, CardModCheckResult } from '../types/kk'
+import type { CardDetail, CardModCheckResult, LogEntry } from '../types/kk'
 
 interface CardEditorModalProps {
   card: CardDetail | null
@@ -19,6 +19,8 @@ interface CardEditorModalProps {
   onReset: () => void
   onCopyModIds: () => void
   onCheckCardMods: () => void
+  onNotify?: (msg: string, tone?: 'info' | 'ok' | 'warn' | 'error') => void
+  onLog?: (level: LogEntry['level'], source: string, msg: string) => void
 }
 
 /** 画廊原地大浮层编辑工作台：不打断画廊筛选与滚动位置，支持 Esc 退出与未保存保护。 */
@@ -38,6 +40,8 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
   onReset,
   onCopyModIds,
   onCheckCardMods,
+  onNotify,
+  onLog,
 }) => {
   useEffect(() => {
     if (!card) return
@@ -149,6 +153,8 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
             onReset={onReset}
             onCopyModIds={onCopyModIds}
             onCheckCardMods={onCheckCardMods}
+            onNotify={onNotify}
+            onLog={onLog}
           />
         </div>
       </div>

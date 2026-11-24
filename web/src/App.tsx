@@ -431,7 +431,12 @@ export const App: React.FC = () => {
     setModalOriginal(structuredClone(savedCard))
     setModalCoverPath('')
     setModalDirty(false)
-    notify(`已保存到：${res.data.savedPath}`, 'ok')
+    if (res.data.warning) {
+      notify(res.data.warning, 'warn')
+      appendLog('warn', 'EDITOR', res.data.warning)
+    } else {
+      notify(`已保存到：${res.data.savedPath}`, 'ok')
+    }
     appendLog('ok', 'EDITOR', `保存成功：${res.data.savedPath}`)
   }
 
@@ -507,7 +512,12 @@ export const App: React.FC = () => {
     setEditorOriginal(structuredClone(savedCard))
     setPendingCoverPath('')
     setEditorDirty(false)
-    notify(`已保存到：${res.data.savedPath}`, 'ok')
+    if (res.data.warning) {
+      notify(res.data.warning, 'warn')
+      appendLog('warn', 'EDITOR', res.data.warning)
+    } else {
+      notify(`已保存到：${res.data.savedPath}`, 'ok')
+    }
     appendLog('ok', 'EDITOR', `保存成功：${res.data.savedPath}`)
   }
 
@@ -815,7 +825,10 @@ export const App: React.FC = () => {
             }}
             onQuickEditCard={(card) => void handleQuickEditCard(card)}
             onInspectScene={(card) => void handleInspectSceneFromGallery(card)}
+            onTagsSaved={(path, tags) => setCards(prev => prev.map(c => c.path === path ? { ...c, tags } : c))}
             onRevealFile={(p) => void backend.revealInExplorer(p)}
+            onNotify={notify}
+            onLog={appendLog}
           />
         )}
 
@@ -847,6 +860,8 @@ export const App: React.FC = () => {
               notify(`已复制 ${editorCard.modIds.length} 条 Mod GUID`, 'ok')
             }}
             onCheckCardMods={() => void handleCheckEditorMods()}
+            onNotify={notify}
+            onLog={appendLog}
           />
         )}
 
@@ -890,6 +905,8 @@ export const App: React.FC = () => {
             extracting={extractingScene}
             onPickScene={() => void handlePickScene()}
             onExtractCharacters={() => void handleExtractScene()}
+            onNotify={notify}
+            onLog={appendLog}
           />
         )}
 
@@ -992,6 +1009,8 @@ export const App: React.FC = () => {
             res.data.missing.length > 0 ? 'warn' : 'ok',
           )
         }}
+        onNotify={notify}
+        onLog={appendLog}
       />
 
       <ConfirmModal dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
