@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import {
   AlertTriangle,
+  ArrowLeftRight,
   CheckCircle2,
   Download,
   ExternalLink,
@@ -10,10 +11,16 @@ import {
   Save,
   ShieldCheck,
   Tag,
+  UserRound,
   Wrench,
 } from 'lucide-react'
 import { backend, waitTask, type ImportPlan } from '../lib/bridge'
-import type { LogEntry } from '../types/kk'
+import {
+  getCardConvertCapability,
+  normalizeDisplayAuthor,
+  normalizeUserId,
+} from '../lib/cardDisplay'
+import type { AuthorSource, CardType, LogEntry } from '../types/kk'
 import { ConfirmModal, type ConfirmDialogState } from './ConfirmModal'
 
 type NotifyFn = (msg: string, tone?: 'info' | 'ok' | 'warn' | 'error') => void
@@ -206,6 +213,244 @@ export const CardTagEditor: React.FC<{
         </span>
       )}
     </div>
+  )
+}
+
+export const AUTHOR_SOURCE_LABEL: Record<AuthorSource, string> = {
+  card: '卡内记录',
+  manual: '手动设置',
+  userid: 'KKS 创作者 ID',
+  '': '',
+}
+
+export const CardAuthorEditor: React.FC<{
+  path: string
+  initialAuthor?: string
+  initialSource?: AuthorSource
+  initialHistory?: string[]
+  userId?: string
+  onSaved: (author: string, source: AuthorSource, history: string[]) => void
+  onNotify?: NotifyFn
+  onLog?: LogFn
+}> = ({
+  path,
+  initialAuthor = '',
+  initialSource = '',
+  initialHistory = [],
+  userId = '',
+  onSaved,
+  onNotify,
+  onLog,
+}) => {
+  const cleanInitialAuthor = normalizeDisplayAuthor(initialAuthor)
+  const [text, setText] = useState(cleanInitialAuthor)
+  const [savedManual, setSavedManual] = useState(initialSource === 'manual' ? cleanInitialAuthor : '')
+  const [cardAuthor, setCardAuthor] = useState(initialSource === 'manual' ? '' : cleanInitialAuthor)
+  const [source, setSource] = useState<AuthorSource>(cleanInitialAuthor ? initialSource : '')
+  const [history, setHistory] = useState<string[]>(initialHistory)
+  const [uid, setUid] = useState(normalizeUserId(userId))
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    void backend.getCardAuthor(path).then((r) => {
+      if (!active) return
+      if (r.ok && r.data) {
+        const nextManual = normalizeDisplayAuthor(r.data.manualAuthor)
+        const nextCard = normalizeDisplayAuthor(r.data.cardAuthor)
+        const nextEffective = nextManual || nextCard
+        setText(nextEffective)
+        setSavedManual(nextManual)
+        setCardAuthor(nextCard)
+        setSource(nextEffective ? r.data.authorSource || '' : '')
+        setHistory(r.data.authorHistory || [])
+        setUid(normalizeUserId(r.data.userId))
+      }
+      setLoading(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [path])
+
+  const effectiveBaseline = savedManual || cardAuthor
+  const dirty = text.trim() !== effectiveBaseline
+
+  const save = async (nextVal?: string) => {
+    if (loading || busy) return
+    const val = (nextVal ?? text).trim()
+    setBusy(true)
+    const r = await backend.setCardAuthor(path, val)
+    setBusy(false)
+    if (r.ok && r.data) {
+      const nextManual = normalizeDisplayAuthor(r.data.manualAuthor)
+      const nextCard = normalizeDisplayAuthor(r.data.cardAuthor)
+      const nextEffective = normalizeDisplayAuthor(r.data.author)
+      setSavedManual(nextManual)
+      setCardAuthor(nextCard)
+      setSource(nextEffective ? r.data.authorSource || '' : '')
+      setHistory(r.data.authorHistory || [])
+      setText(nextEffective)
+      setUid(normalizeUserId(r.data.userId))
+      onSaved(nextEffective, nextEffective ? r.data.authorSource || '' : '', r.data.authorHistory || [])
+      onNotify?.(
+        val ? `已设置作者：${nextEffective}` : '已清除手动作者，恢复卡内识别',
+        'ok',
+      )
+      onLog?.('ok', 'AUTHOR', `${val ? `设置作者=${val}` : '清除手动作者'} -> ${path}`)
+    } else {
+      const msg = r.error || '作者保存失败'
+      onNotify?.(msg, 'error')
+      onLog?.('error', 'AUTHOR', msg)
+    }
+  }
+
+  return (
+    <div className="kk-surface-alt flex flex-col gap-2 p-3 text-[12px]">
+      <div className="flex items-center justify-between gap-2">
+        <label
+          className="flex items-center gap-1.5 font-medium"
+          style={{ color: 'var(--text-strong)' }}
+          htmlFor="card-author-input"
+        >
+          <UserRound size={12} style={{ color: 'var(--primary)' }} />
+          <span>卡片作者</span>
+        </label>
+        <span
+          className="rounded-full px-1.5 py-[1px] text-[10.5px]"
+          style={{
+            backgroundColor: source === 'card' ? 'var(--success-soft)' : 'var(--surface)',
+            color: source === 'card' ? 'var(--success)' : 'var(--text-dim)',
+          }}
+        >
+          {AUTHOR_SOURCE_LABEL[source] || '未记录'}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <input
+          id="card-author-input"
+          className="kk-input h-8 min-w-0 flex-1 py-1 text-[12px]"
+          placeholder="留空则使用卡内记录，或输入自定义作者"
+          value={text}
+          disabled={loading || busy}
+          maxLength={80}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              if (dirty) void save()
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="kk-btn h-8 shrink-0 px-2.5 text-[12px]"
+          disabled={loading || busy || !dirty}
+          onClick={() => void save()}
+        >
+          <Save size={12} />
+          <span>{busy ? '保存中' : '保存'}</span>
+        </button>
+      </div>
+
+      {savedManual && cardAuthor && (
+        <div className="flex items-center justify-between text-[11px]" style={{ color: 'var(--text-dim)' }}>
+          <span className="truncate">卡内原记录：{cardAuthor}</span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void save('')}
+            className="shrink-0 underline cursor-pointer"
+            style={{ color: 'var(--primary)' }}
+          >
+            恢复
+          </button>
+        </div>
+      )}
+
+      {history.length > 1 && (
+        <div className="text-[11px]" style={{ color: 'var(--text-dim)' }}>
+          修改链：{history.join(' → ')}
+        </div>
+      )}
+
+      {uid && (
+        <div className="font-mono-num truncate text-[10.5px]" style={{ color: 'var(--text-dim)' }} title={uid}>
+          KKS userID: {uid}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export const ConvertCardButton: React.FC<{
+  path: string
+  game: string
+  cardType?: CardType
+  disabled?: boolean
+  className?: string
+  title?: string
+  onConverted?: (savedPath: string, targetGame: 'KK' | 'KKS') => void
+  onNotify?: NotifyFn
+  onLog?: LogFn
+}> = ({
+  path,
+  game,
+  cardType = 'character',
+  disabled,
+  className,
+  title,
+  onConverted,
+  onNotify,
+  onLog,
+}) => {
+  const [busy, setBusy] = useState(false)
+  const cap = getCardConvertCapability(cardType, game)
+  const target = cap.targetGame
+  const label = !cap.canConvert
+    ? cardType === 'coordinate'
+      ? '服装卡不支持转换'
+      : cardType === 'scene'
+        ? '场景卡不支持转换'
+        : '仅支持 KK/KKS 角色卡'
+    : target === 'KKS'
+      ? '另存为 KKS (2代)'
+      : '另存为 KK (1代)'
+
+  const handleConvert = async () => {
+    if (busy || disabled || !cap.canConvert || !target) return
+    setBusy(true)
+    const res = await backend.convertCard(path, target)
+    setBusy(false)
+    if (res.ok && res.data) {
+      onConverted?.(res.data.savedPath, target)
+      onNotify?.(`已转换为 ${target} 并另存为：${res.data.savedPath}`, 'ok')
+      onLog?.('ok', 'CONVERT', `${res.data.sourceGame} → ${target}：${res.data.savedPath}`)
+    } else {
+      const msg = res.error || '卡片转换失败'
+      onNotify?.(msg, 'error')
+      onLog?.('error', 'CONVERT', msg)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      title={
+        !cap.canConvert
+          ? cap.reason
+          : title || `按结构化块转换角色卡并另存为 ${target} 格式，不覆盖原卡`
+      }
+      disabled={busy || disabled || !cap.canConvert}
+      onClick={() => void handleConvert()}
+      className={className || 'kk-btn w-full py-1.5 text-[12px]'}
+    >
+      <ArrowLeftRight size={13} />
+      <span>{busy ? '转换中…' : label}</span>
+    </button>
   )
 }
 

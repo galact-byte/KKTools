@@ -19,6 +19,7 @@ interface CardEditorModalProps {
   onReset: () => void
   onCopyModIds: () => void
   onCheckCardMods: () => void
+  onCardConverted?: (savedPath: string, targetGame: 'KK' | 'KKS') => void
   onNotify?: (msg: string, tone?: 'info' | 'ok' | 'warn' | 'error') => void
   onLog?: (level: LogEntry['level'], source: string, msg: string) => void
 }
@@ -40,6 +41,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
   onReset,
   onCopyModIds,
   onCheckCardMods,
+  onCardConverted,
   onNotify,
   onLog,
 }) => {
@@ -153,6 +155,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
             onReset={onReset}
             onCopyModIds={onCopyModIds}
             onCheckCardMods={onCheckCardMods}
+            onCardConverted={onCardConverted}
             onNotify={onNotify}
             onLog={onLog}
           />

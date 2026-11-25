@@ -54,3 +54,8 @@ web/*.tsbuildinfo
 # 本机卡片标签数据
 /card_tags.sqlite3
 /card_tags.sqlite3-*
+
+# 可重建的卡片扫描索引与缩略图缓存
+/card_index.sqlite3
+/card_index.sqlite3-*
+/thumb_cache/

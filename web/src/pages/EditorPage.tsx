@@ -22,8 +22,9 @@ import {
   DENIAL_LABELS,
   KK_PERSONALITIES,
 } from '../data/constants'
-import { DataExportButton } from '../components/WorkflowTools'
+import { ConvertCardButton, DataExportButton } from '../components/WorkflowTools'
 import { backend } from '../lib/bridge'
+import { normalizeDisplayAuthor } from '../lib/cardDisplay'
 import type { CardDetail, CardModCheckResult, LogEntry } from '../types/kk'
 
 interface EditorPageProps {
@@ -42,6 +43,7 @@ interface EditorPageProps {
   onReset: () => void
   onCopyModIds: () => void
   onCheckCardMods: () => void
+  onCardConverted?: (savedPath: string, targetGame: 'KK' | 'KKS') => void
   onNotify?: (msg: string, tone?: 'info' | 'ok' | 'warn' | 'error') => void
   onLog?: (level: LogEntry['level'], source: string, msg: string) => void
 }
@@ -64,6 +66,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   onReset,
   onCopyModIds,
   onCheckCardMods,
+  onCardConverted,
   onNotify,
   onLog,
 }) => {
@@ -277,6 +280,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
             </h2>
             <div className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
               {card.gameName} · v{card.version}
+              {normalizeDisplayAuthor(card.author) ? ` · 作者：${normalizeDisplayAuthor(card.author)}` : ''}
             </div>
             <div
               className="font-mono-num mt-1 truncate text-[11px]"
@@ -365,31 +369,47 @@ export const EditorPage: React.FC<EditorPageProps> = ({
             </button>
           </div>
           {!card.isDemo && (
-            <div className="flex items-center gap-1.5">
-              <DataExportButton
-                kind="character"
-                paths={[card.path]}
-                format="json"
-                label="导出已保存档案 JSON"
-                title={dirty ? '请先保存或还原改动后再导出档案' : '将当前已保存的角色档案导出为 JSON'}
+            <>
+              <ConvertCardButton
+                path={card.path}
+                cardType="character"
+                game={card.game}
                 disabled={saving || dirty}
-                className="kk-btn flex-1 py-1.5 text-[12px]"
-                onExported={setLastExportJson}
+                title={
+                  dirty
+                    ? '请先保存或还原改动后再转换版本'
+                    : `将当前已保存的角色卡转换为 ${card.game === 'KK' ? 'KKS (2代)' : 'KK (1代)'} 并另存为新卡`
+                }
+                onConverted={onCardConverted}
                 onNotify={onNotify}
                 onLog={onLog}
               />
-              {lastExportJson && (
-                <button
-                  type="button"
-                  onClick={() => void backend.revealInExplorer(lastExportJson)}
-                  title={`在资源管理器中定位：${lastExportJson}`}
-                  aria-label="查看导出的 JSON 文件"
-                  className="kk-btn shrink-0 px-2.5 py-1.5 text-[12px]"
-                >
-                  <ExternalLink size={13} />
-                </button>
-              )}
-            </div>
+              <div className="flex items-center gap-1.5">
+                <DataExportButton
+                  kind="character"
+                  paths={[card.path]}
+                  format="json"
+                  label="导出已保存档案 JSON"
+                  title={dirty ? '请先保存或还原改动后再导出档案' : '将当前已保存的角色档案导出为 JSON'}
+                  disabled={saving || dirty}
+                  className="kk-btn flex-1 py-1.5 text-[12px]"
+                  onExported={setLastExportJson}
+                  onNotify={onNotify}
+                  onLog={onLog}
+                />
+                {lastExportJson && (
+                  <button
+                    type="button"
+                    onClick={() => void backend.revealInExplorer(lastExportJson)}
+                    title={`在资源管理器中定位：${lastExportJson}`}
+                    aria-label="查看导出的 JSON 文件"
+                    className="kk-btn shrink-0 px-2.5 py-1.5 text-[12px]"
+                  >
+                    <ExternalLink size={13} />
+                  </button>
+                )}
+              </div>
+            </>
           )}
           {!inModal && (
             <button

@@ -29,9 +29,56 @@ def _key(path: str | Path) -> str:
 
 
 def _tags_connection():
-    conn = sqlite3.connect(settings.app_dir() / 'card_tags.sqlite3', timeout=10)
+    db_path = settings.app_dir() / 'card_tags.sqlite3'
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path, timeout=10)
     conn.execute('CREATE TABLE IF NOT EXISTS tags (path TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY(path, tag))')
+    conn.execute('CREATE TABLE IF NOT EXISTS authors (path TEXT PRIMARY KEY, author TEXT NOT NULL)')
     return conn
+
+
+def get_author_override(path: str | Path) -> str:
+    with closing(_tags_connection()) as conn:
+        row = conn.execute('SELECT author FROM authors WHERE path=?', (_key(path),)).fetchone()
+        return str(row[0]) if row else ''
+
+
+def all_author_overrides() -> dict[str, str]:
+    with closing(_tags_connection()) as conn:
+        return {str(r[0]): str(r[1]) for r in conn.execute('SELECT path, author FROM authors')}
+
+
+def metadata_for_paths(paths: list[str | Path]) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """仅读取当前结果页的本地标签和作者覆盖，不载入整个本地资料库。"""
+    keys = list(dict.fromkeys(_key(path) for path in paths))
+    tags: dict[str, list[str]] = {}
+    authors: dict[str, str] = {}
+    with closing(_tags_connection()) as conn:
+        for start in range(0, len(keys), 500):
+            batch = keys[start:start + 500]
+            placeholders = ",".join("?" for _ in batch)
+            for path, tag in conn.execute(
+                f"SELECT path,tag FROM tags WHERE path IN ({placeholders}) ORDER BY rowid", batch,
+            ):
+                tags.setdefault(path, []).append(tag)
+            authors.update(conn.execute(
+                f"SELECT path,author FROM authors WHERE path IN ({placeholders})", batch,
+            ))
+    return tags, authors
+
+
+def set_author_override(path: str | Path, author: str) -> str:
+    if not Path(path).is_file():
+        raise ValueError('卡片文件不存在')
+    cleaned = str(author or '').strip()
+    if len(cleaned) > 80:
+        raise ValueError('作者名称不超过 80 个字符')
+    with closing(_tags_connection()) as conn, conn:
+        if not cleaned:
+            conn.execute('DELETE FROM authors WHERE path=?', (_key(path),))
+            return ''
+        conn.execute('INSERT OR REPLACE INTO authors (path, author) VALUES (?, ?)', (_key(path), cleaned))
+    return cleaned
 
 
 def get_tags(path: str | Path) -> list[str]:
@@ -83,13 +130,15 @@ def export_data(kind: str, paths: list[str], folder: Path, fmt: str = 'json') ->
         raise ValueError('档案导出每次请选择一张卡片')
     if kind == 'list':
         rows = []
+        overrides = all_author_overrides()
         for p in paths:
-            info = kk_card.read_card_light(p)
-            rows.append([info.name, Path(p).name, info.type, info.game, '; '.join(get_tags(p)), str(Path(p).resolve())])
+            info = kk_card.read_card_light(p, include_thumbnail=False)
+            author = overrides.get(_key(p), '') or info.author
+            rows.append([info.name, author, Path(p).name, info.type, info.game, '; '.join(get_tags(p)), str(Path(p).resolve())])
         target = unique_path(folder, '卡片列表.csv')
         with target.open('x', encoding='utf-8-sig', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['名称', '文件名', '类型', '游戏', '标签', '路径'])
+            writer.writerow(['名称', '作者', '文件名', '类型', '游戏', '标签', '路径'])
             writer.writerows([[_cell(c) for c in row] for row in rows])
         return target
     source = Path(paths[0])

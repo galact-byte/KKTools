@@ -3,6 +3,7 @@ import { ModExchange } from '../components/ModExchange'
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Archive,
+  ArrowLeftRight,
   Clapperboard,
   Download,
   ExternalLink,
@@ -658,7 +659,7 @@ export const SharePage: React.FC<{
   onNotify: (msg: string, tone?: 'info' | 'ok' | 'warn' | 'error') => void
   onLog: (level: LogEntry['level'], source: string, msg: string) => void
 }> = ({ defaultOutDir, onNotify, onLog }) => {
-  const [tab, setTab] = useState<'export' | 'import' | 'organize'>('export')
+  const [tab, setTab] = useState<'export' | 'import' | 'organize' | 'convert'>('export')
   // 导出态
   const [cardPaths, setCardPaths] = useState<string[]>([])
   const [exportOutDir, setExportOutDir] = useState(defaultOutDir)
@@ -677,10 +678,19 @@ export const SharePage: React.FC<{
   const [orgBy, setOrgBy] = useState<'type' | 'game'>('type')
   const [orgMove, setOrgMove] = useState(false)
 
+  // 批量 1代/2代 互转态
+  const [convSources, setConvSources] = useState<string[]>([])
+  const [convTarget, setConvTarget] = useState<'KK' | 'KKS'>('KKS')
+  const [convOutDir, setConvOutDir] = useState(defaultOutDir)
+  const [convRecursive, setConvRecursive] = useState(false)
+  const [convErrors, setConvErrors] = useState<Array<{ path: string; reason: string }>>([])
+
   const [running, setRunning] = useState(false)
   const [progressPct, setProgressPct] = useState(0)
   const [progressText, setProgressText] = useState('')
   const [reportText, setReportText] = useState('')
+  const [reportTab, setReportTab] = useState<'export' | 'import' | 'organize' | 'convert' | null>(null)
+  const [reportTone, setReportTone] = useState<'ok' | 'warn' | 'error'>('ok')
   const [resultDir, setResultDir] = useState('')
 
   const runExport = async () => {
@@ -728,6 +738,8 @@ export const SharePage: React.FC<{
     const rep = done.data.report
     const summary = `导出完成：卡片 ${Array.isArray(rep.cards) ? rep.cards.length : cardPaths.length} 张 · 打包 Mod ${Array.isArray(rep.copied_mods) ? rep.copied_mods.length : 0} 项 · 缺失 ${Array.isArray(rep.total_missing) ? rep.total_missing.length : 0} 项`
     setReportText(summary)
+    setReportTab('export')
+    setReportTone('ok')
     setResultDir(done.data.outDir)
     onNotify(summary, 'ok')
     onLog('ok', 'SHARE', `${summary} -> ${done.data.outDir}`)
@@ -769,6 +781,8 @@ export const SharePage: React.FC<{
     const rep = done.data.report
     const summary = `导入完成：还原卡片 ${rep.cards ?? 0} 张 · Mod ${rep.mods ?? 0} 项 · 跳过已有卡片 ${rep.cards_skipped ?? 0} 张`
     setReportText(summary)
+    setReportTab('import')
+    setReportTone('ok')
     setResultDir(done.data.cardTarget)
     onNotify(summary, 'ok')
     onLog('ok', 'SHARE', summary)
@@ -808,9 +822,75 @@ export const SharePage: React.FC<{
     }
     const summary = `整理完成：处理完成，结果已输出至目标目录`
     setReportText(summary)
+    setReportTab('organize')
+    setReportTone('ok')
     setResultDir(done.data.outDir)
     onNotify(summary, 'ok')
     onLog('ok', 'SHARE', `${summary} (${done.data.outDir})`)
+  }
+
+  const runBatchConvert = async () => {
+    if (convSources.length === 0) {
+      onNotify('请先添加要转换的卡片文件或目录', 'warn')
+      return
+    }
+    let out = convOutDir.trim()
+    if (!out) {
+      const r = await backend.pickDirectory('选择转换输出目录')
+      if (!r.ok || !r.data) return
+      out = r.data
+      setConvOutDir(out)
+    }
+    setRunning(true)
+    setProgressPct(6)
+    setProgressText(`正在批量转换为 ${convTarget}…`)
+    setReportText('')
+    setConvErrors([])
+
+    const startRes = await backend.startBatchConvertCards({
+      sources: convSources,
+      target: convTarget,
+      outDir: out,
+      recursive: convRecursive,
+    })
+    if (!startRes.ok || !startRes.data) {
+      setRunning(false)
+      onNotify(`启动转换失败：${startRes.error}`, 'error')
+      return
+    }
+    const done = await waitTask<{
+      total: number
+      converted: number
+      skipped: number
+      failed: number
+      outDir: string
+      errors?: Array<{ path: string; reason: string }>
+    }>(startRes.data.taskId, (st) => {
+      setProgressPct(st.percent)
+      setProgressText(st.message)
+    })
+    setRunning(false)
+    if (!done.ok || !done.data) {
+      onNotify(`批量转换失败：${done.error}`, 'error')
+      onLog('error', 'CONVERT', `批量转换失败：${done.error}`)
+      return
+    }
+    const r = done.data
+    const allFailed = r.failed > 0 && r.converted === 0 && r.skipped === 0
+    const tone: 'ok' | 'warn' | 'error' = allFailed ? 'error' : r.failed > 0 ? 'warn' : 'ok'
+    const prefix = allFailed
+      ? `转换未成功（目标 ${convTarget}）`
+      : r.failed > 0
+        ? `部分转换完成（目标 ${convTarget}）`
+        : `转换完成（目标 ${convTarget}）`
+    const summary = `${prefix}：成功 ${r.converted} 张 · 已是目标版本跳过 ${r.skipped} 张 · 失败 ${r.failed} 张`
+    setReportText(summary)
+    setReportTab('convert')
+    setReportTone(tone)
+    setResultDir(r.converted > 0 ? r.outDir : '')
+    setConvErrors(r.errors || [])
+    onNotify(summary, tone)
+    onLog(tone, 'CONVERT', `${summary} -> ${r.outDir}`)
   }
 
   return (
@@ -823,6 +903,7 @@ export const SharePage: React.FC<{
                 { id: 'export', label: '整理导出分享包', icon: FolderOutput },
                 { id: 'import', label: '导入分享包', icon: FolderInput },
                 { id: 'organize', label: '分类整理目录', icon: Sparkles },
+                { id: 'convert', label: '1代 / 2代互转', icon: ArrowLeftRight },
               ] as const
             ).map(({ id, label, icon: Icon }) => {
               const active = tab === id
@@ -1133,12 +1214,206 @@ export const SharePage: React.FC<{
               </div>
             </section>
           )}
+
+          {tab === 'convert' && (
+            <section className="kk-surface flex flex-col gap-4 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[14px] font-semibold" style={{ color: 'var(--text-strong)' }}>
+                    KK（1代）↔ KKS（2代）批量结构化互转 ({convSources.length})
+                  </span>
+                  <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                    仅支持角色卡（保留服装、立绘与 Mod 扩展数据 KKEx），默认另存到目标目录不修改原卡；独立服装卡与场景卡暂不支持转换，批量中遇到将自动跳过并逐项报告失败原因
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={running}
+                    onClick={async () => {
+                      const r = await backend.pickCardFiles('选择要转换的卡片 PNG')
+                      if (r.ok && r.data && r.data.length > 0) {
+                        setConvSources((prev) => Array.from(new Set([...prev, ...r.data!])))
+                      }
+                    }}
+                    className="kk-btn text-[12px]"
+                  >
+                    <FilePlus2 size={13} />
+                    <span>添加卡片</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={running}
+                    onClick={async () => {
+                      const r = await backend.pickDirectory('添加待转换卡片目录')
+                      if (r.ok && r.data) {
+                        setConvSources((prev) => Array.from(new Set([...prev, r.data!])))
+                      }
+                    }}
+                    className="kk-btn text-[12px]"
+                  >
+                    <FolderOpen size={13} />
+                    <span>添加目录</span>
+                  </button>
+                  {convSources.length > 0 && (
+                    <button
+                      type="button"
+                      disabled={running}
+                      onClick={() => setConvSources([])}
+                      className="kk-btn kk-btn-danger px-2 text-[12px]"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {convSources.length > 0 && (
+                <div className="flex max-h-36 flex-col gap-1 overflow-y-auto">
+                  {convSources.map((p) => (
+                    <div key={p} className="kk-surface-alt flex items-center justify-between px-3 py-1.5 text-[12px]">
+                      <span className="font-mono-num truncate" style={{ color: 'var(--text-strong)' }}>
+                        {p}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setConvSources((prev) => prev.filter((x) => x !== p))}
+                        className="kk-btn-ghost flex h-6 w-6 items-center justify-center rounded-[5px] cursor-pointer"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                    目标游戏版本
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {(
+                      [
+                        { id: 'KKS', label: '转为 KKS（2代 · 日光浴）' },
+                        { id: 'KK', label: '转为 KK（1代 · 原版）' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        disabled={running}
+                        onClick={() => setConvTarget(opt.id)}
+                        className="flex-1 rounded-[var(--radius-sm)] px-3 py-2 text-[12.5px] font-semibold transition-colors cursor-pointer"
+                        style={{
+                          backgroundColor:
+                            convTarget === opt.id ? 'var(--primary-soft)' : 'var(--surface-alt)',
+                          border: `1px solid ${convTarget === opt.id ? 'var(--primary-border)' : 'var(--border)'}`,
+                          color: convTarget === opt.id ? 'var(--primary)' : 'var(--text)',
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                    输出目录（另存新卡）
+                  </span>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={convOutDir}
+                      onChange={(e) => setConvOutDir(e.target.value)}
+                      placeholder="选择输出目录"
+                      className="kk-input h-9 flex-1 text-[12.5px]"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const r = await backend.pickDirectory('选择转换输出目录', convOutDir)
+                        if (r.ok && r.data) setConvOutDir(r.data)
+                      }}
+                      className="kk-btn h-9 px-2.5"
+                    >
+                      <FolderOpen size={14} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="flex cursor-pointer items-center gap-1.5 text-[12.5px]" style={{ color: 'var(--text)' }}>
+                  <input
+                    type="checkbox"
+                    checked={convRecursive}
+                    disabled={running}
+                    onChange={(e) => setConvRecursive(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[var(--primary)]"
+                  />
+                  <span>目录包含子文件夹</span>
+                </label>
+
+                <button
+                  type="button"
+                  disabled={running}
+                  onClick={() => void runBatchConvert()}
+                  className="kk-btn kk-btn-primary"
+                >
+                  <ArrowLeftRight size={14} />
+                  <span>{running ? '批量转换中…' : `开始转换为 ${convTarget}`}</span>
+                </button>
+              </div>
+
+              {convErrors.length > 0 && (
+                <div className="kk-surface-alt flex max-h-44 flex-col gap-1.5 overflow-y-auto p-3 text-[11.5px]">
+                  <div className="font-semibold" style={{ color: 'var(--danger)' }}>
+                    以下文件未转换（共 {convErrors.length} 条失败记录）：
+                  </div>
+                  {convErrors.map((e) => {
+                    const baseName = e.path.split(/[\\/]/).pop() || e.path
+                    return (
+                      <div
+                        key={`${e.path}-${e.reason}`}
+                        className="flex flex-col gap-0.5 rounded-[var(--radius-sm)] px-2.5 py-1.5"
+                        style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}
+                      >
+                        <span
+                          className="font-mono-num break-all font-medium"
+                          style={{ color: 'var(--text-strong)' }}
+                          title={e.path}
+                        >
+                          {baseName}
+                        </span>
+                        <span className="break-all" style={{ color: 'var(--danger)' }}>
+                          {e.reason}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+          )}
         </div>
 
-        {(running || reportText) && (
+        {(running || (reportText && reportTab === tab)) && (
           <div className="kk-surface flex flex-col gap-2 p-4 text-[12.5px]">
             <div className="flex items-center justify-between gap-2">
-              <span style={{ color: running ? 'var(--text-strong)' : 'var(--success)' }}>
+              <span
+                role="status"
+                style={{
+                  color: running
+                    ? 'var(--text-strong)'
+                    : reportTone === 'error'
+                      ? 'var(--danger)'
+                      : reportTone === 'warn'
+                        ? 'var(--warning)'
+                        : 'var(--success)',
+                }}
+              >
                 {running ? progressText : reportText}
               </span>
               {running ? (
@@ -1184,6 +1459,11 @@ export const ModPage: React.FC<{
   const [checkResult, setCheckResult] = useState<CardModCheckResult | null>(null)
   const [toolBusy, setToolBusy] = useState(false)
   const [toolMsg, setToolMsg] = useState('')
+  const [visibleModCount, setVisibleModCount] = useState(300)
+
+  useEffect(() => {
+    setVisibleModCount(300)
+  }, [keyword, mods])
 
   const filtered = useMemo(() => {
     const q = keyword.trim().toLowerCase()
@@ -1405,7 +1685,7 @@ export const ModPage: React.FC<{
                 </tr>
               </thead>
               <tbody>
-                {filtered.slice(0, 300).map((m) => (
+                {filtered.slice(0, visibleModCount).map((m) => (
                   <tr key={m.path} style={{ borderBottom: '1px solid var(--border)' }}>
                     <td className="px-4 py-2.5">
                       <div className="font-medium" style={{ color: 'var(--text-strong)' }}>
@@ -1431,6 +1711,20 @@ export const ModPage: React.FC<{
                 ))}
               </tbody>
             </table>
+            {visibleModCount < filtered.length && (
+              <div className="flex items-center justify-center gap-3 py-3">
+                <span className="font-mono-num text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                  已显示 {visibleModCount} / {filtered.length} 个 Mod
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setVisibleModCount((prev) => Math.min(filtered.length, prev + 300))}
+                  className="kk-btn text-[12px]"
+                >
+                  加载更多 (+{Math.min(300, filtered.length - visibleModCount)})
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

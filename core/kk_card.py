@@ -46,7 +46,8 @@ KNOWN_MARKERS = {
 
 # 服装卡（coordinate）标识
 COORDINATE_MARKERS = {
-    "【KoiKatuClothes】": ("KK", "服装卡"),
+    # 两作真实独立服装卡共用此标记，代数无法由文件头判定。
+    "【KoiKatuClothes】": ("?", "服装卡（KK/KKS 共用标记）"),
     "【KoiKatuClothesSun】": ("KKS", "服装卡"),
 }
 
@@ -639,6 +640,137 @@ def _read_cs_string_stream(f) -> str:
     return f.read(n).decode("utf-8", "replace")
 
 
+_ANONYMOUS_AUTHORS = frozenset({"", "anonymous", "[unknown]", "unknown"})
+
+
+def _decompress_lz4_block(src: bytes, max_output: int = 2 * 1024 * 1024) -> bytes:
+    """纯 Python LZ4 raw block 解压（用于 MessagePack-CSharp ExtType 99）。"""
+    out = bytearray()
+    i = 0
+    n = len(src)
+    while i < n:
+        token = src[i]
+        i += 1
+        lit_len = token >> 4
+        if lit_len == 15:
+            while i < n:
+                b = src[i]
+                i += 1
+                lit_len += b
+                if b != 255:
+                    break
+        if i + lit_len > n:
+            raise KKCardError("LZ4 数据损坏：字面量长度越界")
+        out.extend(src[i : i + lit_len])
+        i += lit_len
+        if len(out) > max_output:
+            raise KKCardError("LZ4 解压超出大小上限")
+        if i >= n:
+            break
+        if i + 2 > n:
+            raise KKCardError("LZ4 数据损坏：缺少匹配偏移")
+        offset = src[i] | (src[i + 1] << 8)
+        i += 2
+        if offset <= 0 or offset > len(out):
+            raise KKCardError("LZ4 数据损坏：非法匹配偏移")
+        match_len = (token & 0x0F) + 4
+        if (token & 0x0F) == 15:
+            while i < n:
+                b = src[i]
+                i += 1
+                match_len += b
+                if b != 255:
+                    break
+        if len(out) + match_len > max_output:
+            raise KKCardError("LZ4 解压超出大小上限")
+        pos = len(out) - offset
+        for _ in range(match_len):
+            out.append(out[pos])
+            pos += 1
+    return bytes(out)
+
+
+def _decode_authors_payload(raw_val) -> list[str]:
+    """解码 KKEx['marco.authordata'][1]['Authors']（兼容普通 list、嵌套 msgpack 与 LZ4 ExtType 99）。"""
+    val = raw_val
+    if isinstance(val, (bytes, bytearray)):
+        try:
+            val = msgpack.unpackb(val, raw=False, strict_map_key=False)
+        except Exception:  # noqa: BLE001
+            return []
+    if isinstance(val, msgpack.ExtType) and val.code == 99:
+        try:
+            up = msgpack.Unpacker(raw=False, strict_map_key=False)
+            up.feed(val.data)
+            uncomp_len = int(next(iter(up)))
+            consumed = up.tell()
+            raw_dec = _decompress_lz4_block(val.data[consumed:], max_output=max(uncomp_len + 64, 65536))
+            val = msgpack.unpackb(raw_dec, raw=False, strict_map_key=False)
+        except Exception:  # noqa: BLE001
+            return []
+    if not isinstance(val, (list, tuple)):
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in val:
+        text = item.decode("utf-8", errors="replace").strip() if isinstance(item, (bytes, bytearray)) else str(item or "").strip()
+        if not text or text.lower() in _ANONYMOUS_AUTHORS:
+            continue
+        if text not in seen:
+            seen.add(text)
+            cleaned.append(text)
+    return cleaned
+
+
+def extract_author_from_blocks(
+    kkex_raw: bytes | None,
+    about_raw: bytes | None = None,
+) -> tuple[str, tuple[str, ...], str, str]:
+    """从卡片内部 KKEx / About 块提取作者信息。
+
+    返回 (display_author, author_history, author_source, user_id)：
+    - author_source == 'card'   : 来自 KKEx['marco.authordata'] 可读昵称
+    - author_source == 'userid' : 来自 KKS About.userID 创作者机器标识（格式化为 KKSID:<前8位>）
+    - author_source == ''       : 卡内无作者标识
+    """
+    user_id = ""
+    if about_raw:
+        try:
+            about = msgpack.unpackb(about_raw, raw=False, strict_map_key=False)
+            if isinstance(about, dict):
+                uid = about.get("userID") or about.get("userid") or ""
+                if isinstance(uid, (bytes, bytearray)):
+                    uid = uid.decode("utf-8", errors="replace")
+                user_id = str(uid).strip()
+                if user_id.replace("-", "").strip("0") == "":
+                    user_id = ""
+        except Exception:  # noqa: BLE001
+            user_id = ""
+
+    if kkex_raw and b"marco.authordata" in kkex_raw:
+        try:
+            kkex = msgpack.unpackb(kkex_raw, raw=False, strict_map_key=False)
+            if isinstance(kkex, dict) and "marco.authordata" in kkex:
+                entry = kkex["marco.authordata"]
+                if isinstance(entry, (list, tuple)) and len(entry) >= 2 and isinstance(entry[1], dict):
+                    authors = _decode_authors_payload(entry[1].get("Authors"))
+                    if authors:
+                        return authors[0], tuple(authors), "card", user_id
+        except Exception:  # noqa: BLE001
+            pass
+
+    if user_id:
+        short_id = user_id.replace("-", "")[:8]
+        if short_id:
+            return f"KKSID:{short_id}", (), "userid", user_id
+    return "", (), "", user_id
+
+
+def extract_card_author(card: "KoikatuCard") -> tuple[str, tuple[str, ...], str, str]:
+    """从已加载的 KoikatuCard 对象提取卡内作者信息。"""
+    return extract_author_from_blocks(card.blocks.get("KKEx"), card.blocks.get("About"))
+
+
 def _read_first_png_stream(f) -> bytes | None:
     """从文件流读出开头那张完整 PNG（缩略图），读到 IEND 即停，不加载整文件。"""
     sig = f.read(8)
@@ -660,6 +792,21 @@ def _read_first_png_stream(f) -> bytes | None:
             return bytes(buf)
 
 
+def _skip_first_png_stream(f) -> bool:
+    """仅跳过文件开头那张 PNG 到 IEND 之后，不把缩略图读进内存。"""
+    if f.read(8) != PNG_SIGNATURE:
+        return False
+    while True:
+        hdr = f.read(8)
+        if len(hdr) < 8:
+            return False
+        clen = struct.unpack(">I", hdr[:4])[0]
+        ctype = hdr[4:8]
+        f.seek(clen + 4, io.SEEK_CUR)
+        if ctype == b"IEND":
+            return True
+
+
 @dataclass
 class LightInfo:
     type: str          # character / coordinate / scene / other
@@ -667,43 +814,79 @@ class LightInfo:
     marker: str
     name: str
     thumbnail: bytes
+    author: str = ""
+    author_history: tuple[str, ...] = ()
+    author_source: str = ""
+    user_id: str = ""
 
 
-def _light_read_name(f) -> str:
-    """流定位在 marker 之后时，跳过脸图、seek 到 Parameter 块读取角色名。"""
+_MAX_LIGHT_KKEX_BYTES = 32 * 1024 * 1024
+
+
+def _light_read_meta(f) -> tuple[str, str, tuple[str, ...], str, str]:
+    """流定位在 marker 之后时，跳过脸图、按需 seek 读取 Parameter / About / KKEx(作者)。"""
+    name = ""
+    author = ""
+    author_history: tuple[str, ...] = ()
+    author_source = ""
+    user_id = ""
     try:
         _read_cs_string_stream(f)                       # version
         face_len = struct.unpack("<i", f.read(4))[0]
         if face_len < 0:
-            return ""
+            return name, author, author_history, author_source, user_id
         f.seek(face_len, io.SEEK_CUR)                    # 跳过脸图，不读
         lst_len = struct.unpack("<i", f.read(4))[0]
         lstinfo = msgpack.unpackb(f.read(lst_len), raw=False, strict_map_key=False)
         f.read(8)                                        # dataLen(int64)
         data_start = f.tell()
-        param = next((i for i in lstinfo.get("lstInfo", []) if i.get("name") == "Parameter"), None)
-        if not param:
-            return ""
-        f.seek(data_start + int(param["pos"]))
-        pd = msgpack.unpackb(f.read(int(param["size"])), raw=False, strict_map_key=False)
-        if isinstance(pd, dict):
-            return f"{pd.get('lastname','')}{pd.get('firstname','')}".strip() or pd.get("nickname", "")
-    except Exception:  # noqa: BLE001 - 取名失败不致命，返回空
-        return ""
-    return ""
+
+        raw_list = lstinfo.get("lstInfo", [])
+        if isinstance(raw_list, dict):
+            raw_list = list(raw_list.values())
+        by_name = {i.get("name"): i for i in raw_list if isinstance(i, dict) and i.get("name")}
+
+        param = by_name.get("Parameter")
+        if param:
+            f.seek(data_start + int(param["pos"]))
+            pd = msgpack.unpackb(f.read(int(param["size"])), raw=False, strict_map_key=False)
+            if isinstance(pd, dict):
+                name = f"{pd.get('lastname','')}{pd.get('firstname','')}".strip() or pd.get("nickname", "")
+
+        about_raw: bytes | None = None
+        about_info = by_name.get("About")
+        if about_info and 0 < int(about_info.get("size", 0)) <= 65536:
+            f.seek(data_start + int(about_info["pos"]))
+            about_raw = f.read(int(about_info["size"]))
+
+        kkex_raw: bytes | None = None
+        kkex_info = by_name.get("KKEx")
+        if kkex_info and 0 < int(kkex_info.get("size", 0)) <= _MAX_LIGHT_KKEX_BYTES:
+            f.seek(data_start + int(kkex_info["pos"]))
+            kkex_raw = f.read(int(kkex_info["size"]))
+
+        author, author_history, author_source, user_id = extract_author_from_blocks(kkex_raw, about_raw)
+    except Exception:  # noqa: BLE001 - 元数据提取失败不致命
+        return name, author, author_history, author_source, user_id
+    return name, author, author_history, author_source, user_id
 
 
-def read_card_light(path: str | Path) -> LightInfo:
-    """轻量读取一张卡：只取缩略图 + 类型 +（角色卡）名字。
+def read_card_light(path: str | Path, *, include_thumbnail: bool = True) -> LightInfo:
+    """轻量读取一张卡：只取类型、角色名、卡内作者（及可选缩略图）。
 
-    专为浏览器批量扫描设计：只读开头那张 PNG，跳过脸图与 Custom/KKEx 等大块，
-    角色卡仅 seek 读 Parameter 取名。相比整文件读取+全量解析快一个数量级。
+    专为浏览器批量扫描设计：跳过脸图与 Custom/Coordinate 等大块；
+    include_thumbnail=False 时连开头 PNG 也直接 seek 跳过，适合海量目录扫描。
     """
     path = Path(path)
     with open(path, "rb") as f:
-        thumb = _read_first_png_stream(f)
-        if thumb is None:
-            return LightInfo("other", "?", "", "", b"")
+        if include_thumbnail:
+            thumb = _read_first_png_stream(f)
+            if thumb is None:
+                return LightInfo("other", "?", "", "", b"")
+        else:
+            if not _skip_first_png_stream(f):
+                return LightInfo("other", "?", "", "", b"")
+            thumb = b""
         head = f.read(4)
         if len(head) < 4:
             return LightInfo("other", "?", "", "", thumb)  # 纯 PNG，无卡片尾部
@@ -713,7 +896,18 @@ def read_card_light(path: str | Path) -> LightInfo:
         except (KKCardError, struct.error):
             return LightInfo("scene", "?", "", "", thumb)
         if marker in KNOWN_MARKERS:
-            return LightInfo("character", KNOWN_MARKERS[marker][0], marker, _light_read_name(f), thumb)
+            name, author, author_history, author_source, user_id = _light_read_meta(f)
+            return LightInfo(
+                "character",
+                KNOWN_MARKERS[marker][0],
+                marker,
+                name,
+                thumb,
+                author=author,
+                author_history=author_history,
+                author_source=author_source,
+                user_id=user_id,
+            )
         if marker in COORDINATE_MARKERS:
             return LightInfo("coordinate", COORDINATE_MARKERS[marker][0], marker, "", thumb)
         # 有尾部数据但 marker 不是已知卡片标识 —— 多为场景卡

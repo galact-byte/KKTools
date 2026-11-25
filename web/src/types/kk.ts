@@ -14,14 +14,47 @@ export type CardType = 'character' | 'coordinate' | 'scene' | 'other'
 
 export interface TaskState<T = unknown> {
   id: string
-  status: 'running' | 'done' | 'error'
+  status: 'running' | 'done' | 'error' | 'cancelled'
   current: number
   total: number
   percent: number
   message: string
-  result?: T
+  result?: T | null
+  resultExpired?: boolean
   error?: string
 }
+
+export interface CardPageQueryOptions {
+  recursive?: boolean
+  offset?: number
+  limit?: number
+  type?: '' | CardType
+  game?: '' | 'KK' | 'KKS' | 'EC' | '?'
+  author?: string
+  search?: string
+}
+
+export interface CardPageResult {
+  directory: string
+  recursive: boolean
+  total: number
+  offset: number
+  limit: number
+  hasMore: boolean
+  indexed: boolean
+  complete: boolean
+  items: CardSummary[]
+}
+
+export interface PagedScanResult {
+  directory: string
+  recursive: boolean
+  total: number
+  paged: boolean
+  complete: boolean
+}
+
+export type AuthorSource = 'card' | 'manual' | 'userid' | ''
 
 export interface CardSummary {
   id: string
@@ -30,6 +63,10 @@ export interface CardSummary {
   type: CardType
   game: string
   name: string
+  author?: string
+  authorSource?: AuthorSource
+  authorHistory?: string[]
+  userId?: string
   thumbnailUrl: string
   tags?: string[]
   isDemo?: boolean
@@ -48,6 +85,10 @@ export interface CardDetail {
   gameName: string
   marker: string
   version: string
+  author?: string
+  authorSource?: AuthorSource
+  authorHistory?: string[]
+  userId?: string
   thumbnailUrl: string
   faceUrl?: string
   isDemo?: boolean

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import shutil
 import xml.etree.ElementTree as ET
@@ -94,7 +95,7 @@ class ModIndex:
     def build(
         self,
         dirs: Iterable[str],
-        progress: Callable[[int, str], None] | None = None,
+        progress: Callable[..., None] | None = None,
         workers: int = 16,
         previous: "ModIndex | None" = None,
     ) -> "ModIndex":
@@ -104,9 +105,7 @@ class ModIndex:
         一致）直接复用，不再打开文件——整合版加几个 mod 后重建可从数分钟降到秒级。
         首次构建（previous 为空）则全量扫描。
 
-        读取 manifest 用线程池并行（机械硬盘上首次冷扫描受寻道限制提升有限，
-        但 SSD 与缓存命中时显著加速；增量重建才是常态优化）。
-        progress(已处理数, 当前文件) 可选回调。
+        progress 支持 2 参数 (done, path) 或 3 参数 (done, total, path) 回调。
         """
         old_files = previous.files if previous else {}
         old_entries = previous.entries if previous else {}
@@ -117,6 +116,29 @@ class ModIndex:
         total = len(files)
         done = 0
         to_read: list[Path] = []
+
+        # 兼容 2 参数 (done, path) 与 3 参数 (done, total, path) 进度回调
+        takes_total = False
+        if progress is not None:
+            try:
+                sig = inspect.signature(progress)
+                pos_params = [
+                    p
+                    for p in sig.parameters.values()
+                    if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                ]
+                has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values())
+                takes_total = has_varargs or len(pos_params) >= 3
+            except (TypeError, ValueError):
+                takes_total = False
+
+        def _emit(cur: int, name: str) -> None:
+            if progress is None:
+                return
+            if takes_total:
+                progress(cur, total, name)
+            else:
+                progress(cur, name)
 
         # 第一遍：复用未变动文件
         for p in files:
@@ -135,6 +157,8 @@ class ModIndex:
                 done += 1
             else:
                 to_read.append(p)
+        if done > 0:
+            _emit(done, "")
 
         # 第二遍：并行读取新增/变动文件的 manifest
         if to_read:
@@ -151,10 +175,9 @@ class ModIndex:
                     if entry:
                         new_entries[entry.guid] = entry
                     done += 1
-                    if progress and (done % 100 == 0 or done == total):
-                        progress(done, str(p))
-        if progress:
-            progress(total, "")
+                    if done % 100 == 0 or done == total:
+                        _emit(done, str(p))
+        _emit(total, "")
 
         self.entries = new_entries
         self.files = new_files

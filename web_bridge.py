@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import os
 import logging
 import base64
@@ -18,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import uuid
 import webbrowser
 from pathlib import Path
@@ -26,6 +29,7 @@ from typing import Any, Callable
 from core import (
     catalog,
     auto_import,
+    card_convert,
     recovery,
     card_scan,
     kk_card,
@@ -140,15 +144,58 @@ def _mod_cache_path() -> Path:
 
 
 class _TaskManager:
-    """线程安全的轻量后台任务跟踪器。"""
+    """线程安全的轻量后台任务跟踪器（支持取消）。"""
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_completed: int = 16, retention_seconds: float = 600) -> None:
         self._lock = threading.Lock()
         self._tasks: dict[str, dict[str, Any]] = {}
+        self._cancels: dict[str, threading.Event] = {}
+        self._completed: dict[str, float] = {}
+        self._result_groups: dict[str, str] = {}
+        self._max_completed = max_completed
+        self._retention_seconds = retention_seconds
 
-    def start(self, fn: Callable[[Callable[[int, int, str], None]], Any]) -> str:
+    def _remove_locked(self, task_id: str) -> None:
+        self._tasks.pop(task_id, None)
+        self._cancels.pop(task_id, None)
+        self._completed.pop(task_id, None)
+        self._result_groups.pop(task_id, None)
+
+    def _prune_locked(self) -> None:
+        now = time.monotonic()
+        ordered = sorted(self._completed, key=self._completed.get)
+        for task_id in ordered:
+            if now - self._completed[task_id] >= self._retention_seconds:
+                self._remove_locked(task_id)
+        ordered = sorted(self._completed, key=self._completed.get)
+        for task_id in ordered[:max(0, len(ordered) - self._max_completed)]:
+            self._remove_locked(task_id)
+        seen = set()
+        for task_id in reversed(ordered):
+            if task_id not in self._tasks:
+                continue
+            group = self._result_groups.get(task_id)
+            task = self._tasks[task_id]
+            if not group or task['result'] is None:
+                continue
+            if group in seen:
+                task['result'] = None
+                task['resultExpired'] = True
+            else:
+                seen.add(group)
+
+    def start(
+        self,
+        fn: Callable[..., Any],
+        *,
+        cancellable: bool = False,
+        result_group: str = "",
+    ) -> str:
         task_id = uuid.uuid4().hex[:12]
+        cancel_ev = threading.Event()
         with self._lock:
+            self._prune_locked()
+            self._result_groups[task_id] = result_group
             self._tasks[task_id] = {
                 "id": task_id,
                 "status": "running",
@@ -159,12 +206,13 @@ class _TaskManager:
                 "result": None,
                 "error": "",
             }
+            self._cancels[task_id] = cancel_ev
 
         def report(current: int, total: int, message: str = "") -> None:
             pct = int((current / total) * 100) if total > 0 else 0
             with self._lock:
                 t = self._tasks.get(task_id)
-                if t:
+                if t and t["status"] == "running":
                     t["current"] = int(current)
                     t["total"] = int(total)
                     t["percent"] = max(0, min(100, pct))
@@ -173,24 +221,59 @@ class _TaskManager:
 
         def runner() -> None:
             try:
-                res = fn(report)
+                res = fn(report, cancel_ev) if cancellable else fn(report)
                 with self._lock:
                     t = self._tasks[task_id]
-                    t["status"] = "done"
-                    t["percent"] = 100
-                    t["result"] = res
+                    if cancel_ev.is_set():
+                        t["status"] = "cancelled"
+                        t["message"] = "已取消"
+                    else:
+                        t["status"] = "done"
+                        t["percent"] = 100
+                        t["result"] = res
+            except card_scan.ScanCancelled:
+                with self._lock:
+                    t = self._tasks[task_id]
+                    t["status"] = "cancelled"
+                    t["message"] = "已取消扫描"
             except Exception as exc:  # noqa: BLE001
                 logging.getLogger("kktools").exception("后台任务失败")
                 with self._lock:
                     t = self._tasks[task_id]
                     t["status"] = "error"
                     t["error"] = str(exc)
+            finally:
+                with self._lock:
+                    if task_id in self._tasks:
+                        self._completed[task_id] = time.monotonic()
+                        self._cancels.pop(task_id, None)
+                        self._prune_locked()
 
         threading.Thread(target=runner, daemon=True).start()
         return task_id
 
+    def cancel(self, task_id: str) -> bool:
+        with self._lock:
+            ev = self._cancels.get(task_id)
+            t = self._tasks.get(task_id)
+            if ev is None or t is None or t["status"] != "running":
+                return False
+            ev.set()
+            t["message"] = "正在取消…"
+            return True
+
+    def release(self, task_id: str) -> bool:
+        with self._lock:
+            self._prune_locked()
+            task = self._tasks.get(task_id)
+            if task is None or task["status"] == "running":
+                return False
+            self._remove_locked(task_id)
+            return True
+
     def get(self, task_id: str) -> dict[str, Any] | None:
         with self._lock:
+            self._prune_locked()
             t = self._tasks.get(task_id)
             return dict(t) if t else None
 
@@ -215,6 +298,8 @@ class KKToolsBridge:
         self._pending_update_artifact: Path | None = None
         self._installing_update: bool = False
         self._has_unsaved_edits: bool = False
+        self._thumb_lock = threading.Lock()
+        self._thumb_registry: dict[str, str] = {}
 
     def bind_window(self, window: Any) -> None:
         self._window = window
@@ -252,6 +337,79 @@ class KKToolsBridge:
         if info is None:
             return _err("任务不存在或已过期")
         return _ok(info)
+
+    def cancel_task(self, task_id: str) -> dict[str, Any]:
+        if not self._tasks.cancel(str(task_id or "")):
+            return _err("任务不存在或已结束")
+        return _ok(True)
+
+    def release_task(self, task_id: str) -> dict[str, Any]:
+        if not self._tasks.release(str(task_id or "")):
+            return _err("任务不存在、已过期或仍在运行")
+        return _ok(True)
+
+    # ---- 缩略图白名单与本地磁盘缓存 ----
+
+    def _register_thumbnail(self, path_str: str, mtime_ns: int = 0, size: int = 0) -> str:
+        norm = os.path.normcase(os.path.abspath(path_str))
+        token = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:16]
+        with self._thumb_lock:
+            self._thumb_registry[token] = norm
+        ver = f"{mtime_ns}_{size}" if (mtime_ns or size) else ""
+        return f"/thumb/{token}?v={ver}" if ver else f"/thumb/{token}"
+
+    def get_thumbnail_bytes(self, token: str, max_width: int = 360) -> tuple[bytes, str] | None:
+        """根据白名单 token 返回缩放后的缩略图字节（优先读取磁盘缓存）。"""
+        if not token or not token.isalnum() or len(token) > 32:
+            return None
+        with self._thumb_lock:
+            path_str = self._thumb_registry.get(token)
+        if not path_str:
+            return None
+        p = Path(path_str)
+        if not p.is_file():
+            return None
+        try:
+            st = p.stat()
+        except OSError:
+            return None
+
+        cache_dir = settings.app_dir() / "thumb_cache"
+        cache_file = cache_dir / f"{token}_{int(st.st_mtime_ns)}_{int(st.st_size)}_{max_width}.webp"
+        if cache_file.is_file():
+            try:
+                return cache_file.read_bytes(), "image/webp"
+            except OSError:
+                pass
+
+        try:
+            with open(p, "rb") as f:
+                raw_png = kk_card._read_first_png_stream(f)
+        except OSError:
+            return None
+        if not raw_png:
+            return None
+
+        try:
+            from PIL import Image
+
+            with Image.open(io.BytesIO(raw_png)) as im:
+                if im.width > max_width and max_width > 0:
+                    new_h = max(1, int(im.height * (max_width / im.width)))
+                    im = im.resize((max_width, new_h), Image.Resampling.LANCZOS)
+                buf = io.BytesIO()
+                im.convert("RGB" if im.mode not in ("RGB", "RGBA") else im.mode).save(
+                    buf, format="WEBP", quality=84, method=4
+                )
+                webp_bytes = buf.getvalue()
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                cache_file.write_bytes(webp_bytes)
+            except OSError:
+                pass
+            return webp_bytes, "image/webp"
+        except Exception:  # noqa: BLE001 - Pillow 异常时回退原始 PNG
+            return raw_png, "image/png"
 
     def cleanup_pending_update(self) -> dict[str, Any]:
         """普通退出或重新检查更新前，清理未安装的更新临时文件。"""
@@ -473,33 +631,131 @@ class KKToolsBridge:
 
     # ---- 目录卡片扫描与类型识别 ----
 
+    def _serialize_scanned_items(self, items: list[card_scan.CardItem]) -> list[dict[str, Any]]:
+        tags, overrides = catalog.metadata_for_paths([item.path for item in items])
+        out: list[dict[str, Any]] = []
+        for idx, item in enumerate(items):
+            p = Path(item.path)
+            norm = os.path.normcase(str(p.resolve()))
+            manual_author = overrides.get(norm, "")
+            if manual_author:
+                author = manual_author
+                author_source = "manual"
+            else:
+                author = item.author
+                author_source = item.author_source
+            thumb_url = self._register_thumbnail(item.path, item.mtime_ns, item.size)
+            out.append(
+                {
+                    "id": "local-" + hashlib.sha256(norm.encode("utf-8")).hexdigest()[:24],
+                    "path": item.path,
+                    "fileName": p.name,
+                    "type": item.type,
+                    "game": item.game,
+                    "name": item.name,
+                    "author": author,
+                    "authorSource": author_source,
+                    "authorHistory": list(item.author_history),
+                    "userId": item.user_id,
+                    "thumbnailUrl": thumb_url,
+                    "isDemo": False,
+                    "tags": tags.get(norm, []),
+                }
+            )
+        return out
+
     def scan_directory(self, directory: str, recursive: bool = False) -> dict[str, Any]:
         try:
             d = Path(directory)
             if not d.is_dir():
                 return _err(f"目录不存在：{directory}")
-            items = card_scan.scan_dir(d, recursive=bool(recursive))
-            out: list[dict[str, Any]] = []
-            tags = catalog.all_tags()
-            for idx, item in enumerate(items):
-                p = Path(item.path)
-                out.append(
-                    {
-                        "id": f"local-{idx}-{p.name}",
-                        "path": item.path,
-                        "fileName": p.name,
-                        "type": item.type,
-                        "game": item.game,
-                        "name": item.name,
-                        "thumbnailUrl": _bytes_to_data_url(item.thumbnail, "image/png"),
-                        "isDemo": False,
-                        "tags": tags.get(os.path.normcase(str(p.resolve())), []),
-                    }
-                )
+            items = card_scan.scan_dir_fast(d, recursive=bool(recursive), include_thumbnail=False)
+            out = self._serialize_scanned_items(items)
             settings.set_value("last_browse_dir", str(d))
             return _ok(out)
         except Exception as exc:  # noqa: BLE001
             return _err(f"扫描目录失败：{exc}")
+
+    def query_card_page(self, directory: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
+        try:
+            if not str(directory or "").strip() or not Path(directory).is_dir():
+                return _err(f"目录不存在：{directory}")
+            if options is None:
+                options = {}
+            if not isinstance(options, dict):
+                return _err("分页参数必须为对象")
+            unknown = set(options) - {"recursive", "offset", "limit", "type", "game", "author", "search"}
+            if unknown:
+                return _err("不支持的分页参数：" + ", ".join(sorted(unknown)))
+            page = card_scan.query_index_page(
+                directory, recursive=options.get("recursive", False), offset=options.get("offset", 0),
+                limit=options.get("limit", 120), card_type=options.get("type", ""),
+                game=options.get("game", ""), author=options.get("author"), search=options.get("search", ""),
+            )
+            page["items"] = self._serialize_scanned_items(page["items"])
+            return _ok(page)
+        except Exception as exc:  # noqa: BLE001
+            return _err(f"查询卡片分页失败：{exc}")
+
+    def start_scan_directory(self, directory: str, recursive: bool = False, paged: bool = False) -> dict[str, Any]:
+        if not isinstance(paged, bool) or not isinstance(recursive, bool):
+            return _err("recursive 和 paged 必须为布尔值")
+        d = Path(str(directory or "").strip()).resolve()
+        if not str(directory or "").strip() or not d.is_dir():
+            return _err(f"目录不存在：{directory}")
+
+        def job(report: Callable[[int, int, str], None], cancel_ev: threading.Event) -> dict[str, Any]:
+            items = card_scan.scan_dir_fast(
+                d, recursive=recursive, progress=report, cancel_event=cancel_ev,
+                include_thumbnail=False, collect_results=not paged,
+            )
+            settings.set_value("last_browse_dir", str(d))
+            if paged:
+                page = card_scan.query_index_page(d, recursive=recursive, limit=1)
+                return {"directory": str(d), "recursive": recursive, "total": page["total"],
+                        "paged": True, "complete": page["complete"]}
+            out = self._serialize_scanned_items(items)
+            return {"directory": str(d), "total": len(out), "items": out}
+
+        return _ok({"taskId": self._tasks.start(job, cancellable=True, result_group="card_scan")})
+
+    def get_card_author(self, path: str) -> dict[str, Any]:
+        try:
+            p = Path(path)
+            if not p.is_file():
+                return _err("卡片文件不存在")
+            manual = catalog.get_author_override(p)
+            info = kk_card.read_card_light(p, include_thumbnail=False)
+            return _ok(
+                {
+                    "author": manual or info.author,
+                    "authorSource": "manual" if manual else info.author_source,
+                    "manualAuthor": manual,
+                    "cardAuthor": info.author,
+                    "authorHistory": list(info.author_history),
+                    "userId": info.user_id,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _err(str(exc))
+
+    def set_card_author(self, path: str, author: str) -> dict[str, Any]:
+        try:
+            p = Path(path)
+            saved_manual = catalog.set_author_override(p, author)
+            info = kk_card.read_card_light(p, include_thumbnail=False)
+            return _ok(
+                {
+                    "author": saved_manual or info.author,
+                    "authorSource": "manual" if saved_manual else info.author_source,
+                    "manualAuthor": saved_manual,
+                    "cardAuthor": info.author,
+                    "authorHistory": list(info.author_history),
+                    "userId": info.user_id,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _err(str(exc))
 
     def inspect_file(self, path: str) -> dict[str, Any]:
         try:
@@ -528,6 +784,8 @@ class KKToolsBridge:
                     raw_scalars[str(k)] = v
 
             mods = sorted(kk_card.extract_mod_ids(card).keys())
+            card_author, author_history, card_author_source, user_id = kk_card.extract_card_author(card)
+            manual_author = catalog.get_author_override(p)
             # 维护最近打开列表
             cfg = settings.load()
             recent = [x for x in cfg.get("recent_cards", []) if x != str(p)]
@@ -542,6 +800,10 @@ class KKToolsBridge:
                     "gameName": card.game_name,
                     "marker": card.marker,
                     "version": card.version,
+                    "author": manual_author or card_author,
+                    "authorSource": "manual" if manual_author else card_author_source,
+                    "authorHistory": list(author_history),
+                    "userId": user_id,
                     "thumbnailUrl": _bytes_to_data_url(card.thumbnail, "image/png"),
                     "faceUrl": _bytes_to_data_url(card.face, "image/png") if card.face else "",
                     "isDemo": False,
@@ -637,14 +899,57 @@ class KKToolsBridge:
             if not overwrite:
                 try:
                     catalog.set_tags(saved, catalog.get_tags(src))
+                    manual_author = catalog.get_author_override(src)
+                    if manual_author:
+                        catalog.set_author_override(saved, manual_author)
                 except Exception as exc:
-                    warning = f'角色卡已保存，但标签未复制：{exc}'
+                    warning = f'角色卡已保存，但标签/作者记录未复制：{exc}'
             return _ok({"savedPath": str(saved), "warning": warning})
         except Exception as exc:  # noqa: BLE001
             return _err(f"保存角色卡失败：{exc}")
         finally:
             with self._save_lock:
                 self._active_saves -= 1
+
+    # ---- KK (1代) ↔ KKS (2代) 卡片互转 ----
+
+    def convert_card(self, path: str, target: str, out_dir: str = "") -> dict[str, Any]:
+        try:
+            res = card_convert.convert_card_file(
+                path,
+                str(target).upper(),  # type: ignore[arg-type]
+                out_dir=out_dir.strip() or None,
+                overwrite=False,
+            )
+            return _ok(res)
+        except Exception as exc:  # noqa: BLE001
+            return _err(f"转换失败：{exc}")
+
+    def start_batch_convert_cards(self, opts: dict[str, Any]) -> dict[str, Any]:
+        sources = [str(p) for p in (opts.get("sources") or []) if str(p).strip()]
+        target = str(opts.get("target") or "").upper()
+        out_dir = str(opts.get("outDir") or "").strip()
+        recursive = bool(opts.get("recursive", False))
+
+        if not sources:
+            return _err("请先选择要转换的卡片文件或目录")
+        if target not in ("KK", "KKS"):
+            return _err("目标版本仅支持 KK（1代）或 KKS（2代）")
+        if not out_dir:
+            return _err("请选择转换后的输出目录")
+
+        def job(report: Callable[[int, int, str], None]) -> dict[str, Any]:
+            return card_convert.batch_convert_cards(
+                sources,
+                target,  # type: ignore[arg-type]
+                out_dir,
+                recursive=recursive,
+                progress=lambda cur, tot, name: report(
+                    cur, max(tot, 1), f"转换 ({cur}/{tot})：{name}" if name else "转换中…"
+                ),
+            )
+
+        return _ok({"taskId": self._tasks.start(job)})
 
     # ---- 解包与打包（core.stego） ----
 
@@ -996,7 +1301,14 @@ class KKToolsBridge:
         items = []
         for entry in idx.entries.values():
             p = Path(entry.path)
-            size_mb = (p.stat().st_size / (1024 * 1024)) if p.is_file() else 0.0
+            fp = idx.files.get(entry.path)
+            if fp is not None and len(fp) >= 2 and isinstance(fp[1], (int, float)):
+                size_mb = float(fp[1]) / (1024 * 1024)
+            else:
+                try:
+                    size_mb = p.stat().st_size / (1024 * 1024)
+                except OSError:
+                    size_mb = 0.0
             items.append(
                 {
                     "guid": entry.guid,
@@ -1026,7 +1338,11 @@ class KKToolsBridge:
             idx = mod_index.ModIndex().build(
                 target_dirs,
                 previous=prev if prev.files else None,
-                progress=lambda cur, name: report(cur, max(cur, 1), f"索引：{Path(name).name}" if name else "整理索引…"),
+                progress=lambda cur, total, name: report(
+                    cur,
+                    max(total, 1),
+                    f"索引 ({cur}/{total})：{Path(name).name}" if name else f"整理索引 ({cur}/{total})…",
+                ),
             )
             idx.save(_mod_cache_path())
             self._mod_index = idx

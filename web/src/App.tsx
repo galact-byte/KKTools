@@ -4,8 +4,8 @@ import { CardEditorModal } from './components/CardEditorModal'
 import { ConfirmModal, type ConfirmDialogState } from './components/ConfirmModal'
 import { KK_PERSONALITIES, mapLegacyTheme } from './data/constants'
 import { DEMO_CARDS, makeDemoDetail } from './data/demoCards'
-import { backend, waitTask } from './lib/bridge'
-import { BrowserPage } from './pages/BrowserPage'
+import { backend, cancelAndReleaseTask, waitTask } from './lib/bridge'
+import { BrowserPage, type BrowserFilterState, type BrowserPageMeta } from './pages/BrowserPage'
 import { EditorPage } from './pages/EditorPage'
 import { SettingsPage, type UpdateUiState } from './pages/SettingsPage'
 import { LogPage, ModPage, PackPage, ScenePage, SharePage } from './pages/WorkspacePages'
@@ -13,10 +13,13 @@ import type {
   AppConfig,
   CardDetail,
   CardModCheckResult,
+  CardPageQueryOptions,
   CardSummary,
+  CardType,
   LogEntry,
   ModSummaryItem,
   PageId,
+  PagedScanResult,
   SceneAnalysisResult,
   ThemeId,
   UpdateInfo,
@@ -85,8 +88,37 @@ export const App: React.FC = () => {
   const [cards, setCards] = useState<CardSummary[]>(DEMO_CARDS)
   const [isDemoMode, setIsDemoMode] = useState(true)
   const [browseDir, setBrowseDir] = useState('')
+  const [scannedDir, setScannedDir] = useState('')
   const [recursive, setRecursive] = useState(false)
   const [scanningCards, setScanningCards] = useState(false)
+  const [scanProgress, setScanProgress] = useState<{ percent: number; message: string } | null>(null)
+  const [loadingPage, setLoadingPage] = useState(false)
+  const [browserFilters, setBrowserFilters] = useState<BrowserFilterState>({
+    type: 'all',
+    game: 'all',
+    author: 'all',
+    search: '',
+  })
+  const [pageMeta, setPageMeta] = useState<BrowserPageMeta>({
+    total: DEMO_CARDS.length,
+    hasMore: false,
+    indexed: true,
+    complete: true,
+    versionCounts: [],
+  })
+  const activeScanTaskId = useRef<string | null>(null)
+  const scanSeqRef = useRef(0)
+  const querySeqRef = useRef(0)
+  const cardsRef = useRef<CardSummary[]>(DEMO_CARDS)
+  const filtersRef = useRef<BrowserFilterState>(browserFilters)
+  const scannedDirRef = useRef(scannedDir)
+  const recursiveRef = useRef(recursive)
+  const loadingPageRef = useRef(false)
+  cardsRef.current = cards
+  filtersRef.current = browserFilters
+  scannedDirRef.current = scannedDir
+  recursiveRef.current = recursive
+  loadingPageRef.current = loadingPage
 
   // 角色编辑状态（独立页）
   const [editorCard, setEditorCard] = useState<CardDetail | null>(() => makeDemoDetail(DEMO_CARDS[0]))
@@ -182,6 +214,104 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('kk-close-blocked', onCloseBlocked)
   }, [notify])
 
+  const fetchVersionCounts = useCallback(async (dir: string, rec: boolean): Promise<Array<[string, number]>> => {
+    const games: Array<'KK' | 'KKS' | 'EC'> = ['KK', 'KKS', 'EC']
+    const results = await Promise.all(
+      games.map(async (g) => {
+        const r = await backend.queryCardPage(dir, { recursive: rec, offset: 0, limit: 1, game: g })
+        if (r.ok && r.data && r.data.indexed && r.data.total > 0) {
+          return [g, r.data.total] as [string, number]
+        }
+        return null
+      }),
+    )
+    return results.filter((x): x is [string, number] => x !== null)
+  }, [])
+
+  const buildPageQueryOptions = useCallback(
+    (rec: boolean, filters: BrowserFilterState, offset: number, limit = 120): CardPageQueryOptions => {
+      const opts: CardPageQueryOptions = {
+        recursive: rec,
+        offset,
+        limit,
+      }
+      if (filters.type !== 'all') opts.type = filters.type as CardType
+      if (filters.game !== 'all') opts.game = filters.game as CardPageQueryOptions['game']
+      if (filters.author === '__UNKNOWN__') opts.author = ''
+      else if (filters.author !== 'all') opts.author = filters.author
+      if (filters.search.trim()) opts.search = filters.search.trim()
+      return opts
+    },
+    [],
+  )
+
+  const queryLocalPage = useCallback(
+    async (opts: {
+      dir: string
+      recursive: boolean
+      filters: BrowserFilterState
+      append: boolean
+      refreshVersions?: boolean
+    }) => {
+      const targetDir = opts.dir.trim()
+      if (!targetDir) return null
+      if (opts.append && loadingPageRef.current) return null
+
+      const seq = ++querySeqRef.current
+      const offset = opts.append ? cardsRef.current.length : 0
+      setLoadingPage(true)
+      const queryOpts = buildPageQueryOptions(opts.recursive, opts.filters, offset, 120)
+
+      const [res, versionCounts] = await Promise.all([
+        backend.queryCardPage(targetDir, queryOpts),
+        opts.refreshVersions ? fetchVersionCounts(targetDir, opts.recursive) : Promise.resolve(null),
+      ])
+
+      if (seq !== querySeqRef.current) return null
+      setLoadingPage(false)
+
+      if (!res.ok || !res.data) {
+        notify(`查询索引分页失败：${res.error || '未知错误'}`, 'error')
+        appendLog('error', 'SCAN', `查询索引分页失败：${res.error || targetDir}`)
+        return null
+      }
+
+      const page = res.data
+      setCards((prev) => {
+        if (!opts.append) return page.items
+        const seen = new Set(prev.map((c) => c.id))
+        const next = [...prev]
+        for (const item of page.items) {
+          if (!seen.has(item.id)) {
+            seen.add(item.id)
+            next.push(item)
+          }
+        }
+        return next
+      })
+      setPageMeta((prev) => ({
+        total: page.total,
+        hasMore: page.hasMore,
+        indexed: page.indexed,
+        complete: page.complete,
+        versionCounts: versionCounts ?? prev.versionCounts,
+      }))
+      return page
+    },
+    [appendLog, buildPageQueryOptions, fetchVersionCounts, notify],
+  )
+
+  // 组件卸载时取消并释放运行中的扫描任务
+  useEffect(() => {
+    return () => {
+      const tid = activeScanTaskId.current
+      if (tid) {
+        activeScanTaskId.current = null
+        void cancelAndReleaseTask(tid)
+      }
+    }
+  }, [])
+
   // 初始化读取后端真实配置、更新状态与缓存 Mod 索引
   useEffect(() => {
     let cancelled = false
@@ -205,7 +335,9 @@ export const App: React.FC = () => {
       const loaded = cfgRes.data
       setConfig(loaded)
       setTheme(mapLegacyTheme(loaded.theme))
-      setBrowseDir(loaded.last_browse_dir || '')
+      if (loaded.last_browse_dir) {
+        setBrowseDir((prev) => prev || loaded.last_browse_dir)
+      }
       appendLog(
         'ok',
         'CORE',
@@ -213,15 +345,58 @@ export const App: React.FC = () => {
       )
 
       if (loaded.last_browse_dir) {
+        const myScanSeq = ++scanSeqRef.current
         setScanningCards(true)
-        const scanRes = await backend.scanDirectory(loaded.last_browse_dir, false)
-        if (!cancelled) {
-          setScanningCards(false)
-          if (scanRes.ok && scanRes.data && scanRes.data.length > 0) {
-            setCards(scanRes.data)
-            setIsDemoMode(false)
-            appendLog('ok', 'SCAN', `自动扫描目录，载入 ${scanRes.data.length} 张本地卡片`)
+        setScanProgress({ percent: 5, message: '正在从增量索引载入上次浏览目录…' })
+        const startRes = await backend.startScanDirectory(loaded.last_browse_dir, false, true)
+        if (!cancelled && myScanSeq === scanSeqRef.current && startRes.ok && startRes.data) {
+          activeScanTaskId.current = startRes.data.taskId
+          const done = await waitTask<PagedScanResult>(
+            startRes.data.taskId,
+            (st) => {
+              if (!cancelled && myScanSeq === scanSeqRef.current) {
+                setScanProgress({ percent: st.percent, message: st.message })
+              }
+            },
+          )
+          if (activeScanTaskId.current === startRes.data.taskId) {
+            activeScanTaskId.current = null
           }
+          if (!cancelled && myScanSeq === scanSeqRef.current) {
+            setScanningCards(false)
+            setScanProgress(null)
+            if (done.ok) {
+              const resetFilters: BrowserFilterState = {
+                type: 'all',
+                game: 'all',
+                author: 'all',
+                search: '',
+              }
+              setBrowserFilters(resetFilters)
+              setScannedDir(loaded.last_browse_dir)
+              const page = await queryLocalPage({
+                dir: loaded.last_browse_dir,
+                recursive: false,
+                filters: resetFilters,
+                append: false,
+                refreshVersions: true,
+              })
+              if (!cancelled && page && page.indexed && page.total > 0) {
+                setIsDemoMode(false)
+                appendLog(
+                  'ok',
+                  'SCAN',
+                  `自动索引目录，共 ${page.total} 张本地卡片（已加载首页 ${page.items.length} 张）`,
+                )
+              } else if (!cancelled) {
+                setCards(DEMO_CARDS)
+                setIsDemoMode(true)
+              }
+            }
+          }
+        } else if (!cancelled && myScanSeq === scanSeqRef.current) {
+          setScanningCards(false)
+          setScanProgress(null)
         }
       }
     }
@@ -242,30 +417,153 @@ export const App: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [appendLog])
+  }, [appendLog, queryLocalPage])
+
+  const handleCancelScan = useCallback(async () => {
+    const tid = activeScanTaskId.current
+    if (!tid) return
+    await backend.cancelTask(tid)
+  }, [])
 
   const handleScanDir = useCallback(
-    async (targetDir?: string) => {
+    async (targetDir?: string, overrideRecursive?: boolean) => {
       const dir = (targetDir ?? browseDir).trim()
+      const useRecursive = overrideRecursive ?? recursiveRef.current
       if (!dir) {
         notify('请先选择角色卡所在目录', 'warn')
         return
       }
+      if (activeScanTaskId.current) {
+        const prevTid = activeScanTaskId.current
+        activeScanTaskId.current = null
+        await cancelAndReleaseTask(prevTid)
+      }
+      const myScanSeq = ++scanSeqRef.current
+      const sameScope =
+        !isDemoMode &&
+        scannedDirRef.current.trim().toLowerCase() === dir.toLowerCase() &&
+        recursiveRef.current === useRecursive
+      const nextFilters: BrowserFilterState = sameScope
+        ? filtersRef.current
+        : { type: 'all', game: 'all', author: 'all', search: '' }
+
+      if (!sameScope) {
+        setBrowserFilters(nextFilters)
+      }
+      setScannedDir(dir)
+      setIsDemoMode(false)
       setScanningCards(true)
-      const res = await backend.scanDirectory(dir, recursive)
-      setScanningCards(false)
-      if (!res.ok || !res.data) {
-        notify(`扫描失败：${res.error || '未知错误'}`, 'error')
-        appendLog('error', 'SCAN', `目录扫描失败：${res.error || dir}`)
+      setScanProgress({ percent: 4, message: '正在遍历目录并更新增量索引…' })
+
+      const startRes = await backend.startScanDirectory(dir, useRecursive, true)
+      if (myScanSeq !== scanSeqRef.current) return
+      if (!startRes.ok || !startRes.data) {
+        setScanningCards(false)
+        setScanProgress(null)
+        notify(`扫描失败：${startRes.error || '未知错误'}`, 'error')
+        appendLog('error', 'SCAN', `目录扫描失败：${startRes.error || dir}`)
         return
       }
-      setCards(res.data)
-      setIsDemoMode(false)
-      notify(`扫描完成，共发现 ${res.data.length} 张卡片`, 'ok')
-      appendLog('ok', 'SCAN', `扫描 ${dir} 完成，共 ${res.data.length} 项`)
+      activeScanTaskId.current = startRes.data.taskId
+      const done = await waitTask<PagedScanResult>(startRes.data.taskId, (st) => {
+        if (myScanSeq === scanSeqRef.current) {
+          setScanProgress({ percent: st.percent, message: st.message })
+        }
+      })
+      if (activeScanTaskId.current === startRes.data.taskId) {
+        activeScanTaskId.current = null
+      }
+      if (myScanSeq !== scanSeqRef.current) return
+
+      setScanningCards(false)
+      setScanProgress(null)
+
+      if (done.cancelled) {
+        notify('已取消目录扫描（已处理缓存可继续浏览）', 'info')
+        appendLog('info', 'SCAN', `已取消扫描：${dir}`)
+        await queryLocalPage({
+          dir,
+          recursive: useRecursive,
+          filters: filtersRef.current,
+          append: false,
+          refreshVersions: true,
+        })
+        return
+      }
+
+      if (!done.ok) {
+        notify(`扫描失败：${done.error || '未知错误'}`, 'error')
+        appendLog('error', 'SCAN', `目录扫描失败：${done.error || dir}`)
+        return
+      }
+
+      // 即使任务结果已过期 (resultExpired=true)，仍从 SQLite 索引查询第一页，不判扫描失败
+      const page = await queryLocalPage({
+        dir,
+        recursive: useRecursive,
+        filters: filtersRef.current,
+        append: false,
+        refreshVersions: true,
+      })
+      if (!page) return
+      const totalCount = done.data?.total ?? page.total
+      notify(`扫描完成，共索引 ${totalCount} 张卡片（已加载首页 ${page.items.length} 张）`, 'ok')
+      appendLog(
+        'ok',
+        'SCAN',
+        `扫描 ${dir} 完成（含子目录=${useRecursive}），共 ${totalCount} 项${done.resultExpired ? '（从索引重载）' : ''}`,
+      )
     },
-    [browseDir, recursive, notify, appendLog],
+    [browseDir, isDemoMode, notify, appendLog, queryLocalPage],
   )
+
+  const handleToggleRecursive = useCallback(() => {
+    const nextRec = !recursiveRef.current
+    setRecursive(nextRec)
+    if (!isDemoMode && scannedDirRef.current.trim()) {
+      const resetFilters: BrowserFilterState = {
+        type: 'all',
+        game: 'all',
+        author: 'all',
+        search: '',
+      }
+      setBrowserFilters(resetFilters)
+      void queryLocalPage({
+        dir: scannedDirRef.current,
+        recursive: nextRec,
+        filters: resetFilters,
+        append: false,
+        refreshVersions: true,
+      })
+    }
+  }, [isDemoMode, queryLocalPage])
+
+  const handleBrowserFiltersChange = useCallback(
+    (next: BrowserFilterState) => {
+      filtersRef.current = next
+      setBrowserFilters(next)
+      if (!isDemoMode && scannedDirRef.current.trim()) {
+        void queryLocalPage({
+          dir: scannedDirRef.current,
+          recursive: recursiveRef.current,
+          filters: next,
+          append: false,
+        })
+      }
+    },
+    [isDemoMode, queryLocalPage],
+  )
+
+  const handleLoadMoreCards = useCallback(() => {
+    if (isDemoMode || !scannedDirRef.current.trim()) return
+    if (!pageMeta.hasMore || loadingPageRef.current) return
+    void queryLocalPage({
+      dir: scannedDirRef.current,
+      recursive: recursiveRef.current,
+      filters: filtersRef.current,
+      append: true,
+    })
+  }, [isDemoMode, pageMeta.hasMore, queryLocalPage])
 
   const handlePickBrowseDir = async () => {
     const res = await backend.pickDirectory('选择角色卡目录', browseDir)
@@ -806,26 +1104,66 @@ export const App: React.FC = () => {
           <BrowserPage
             cards={cards}
             browseDir={browseDir}
+            scannedDir={scannedDir}
             quickDirs={config.quick_dirs || []}
             recursive={recursive}
             scanning={scanningCards}
+            scanProgress={scanProgress}
+            loadingPage={loadingPage}
+            pageMeta={pageMeta}
+            filters={browserFilters}
             isDemoMode={isDemoMode}
             onChangeBrowseDir={setBrowseDir}
             onSelectQuickDir={(dir) => {
               setBrowseDir(dir)
               void handleScanDir(dir)
             }}
-            onToggleRecursive={() => setRecursive((v) => !v)}
+            onToggleRecursive={handleToggleRecursive}
+            onChangeFilters={handleBrowserFiltersChange}
+            onLoadMore={handleLoadMoreCards}
             onPickDirectory={handlePickBrowseDir}
             onScan={() => void handleScanDir()}
+            onCancelScan={() => void handleCancelScan()}
             onLoadDemo={() => {
+              if (activeScanTaskId.current) {
+                const tid = activeScanTaskId.current
+                activeScanTaskId.current = null
+                void cancelAndReleaseTask(tid)
+              }
+              scanSeqRef.current += 1
+              querySeqRef.current += 1
+              setScanningCards(false)
+              setScanProgress(null)
+              setLoadingPage(false)
               setCards(DEMO_CARDS)
               setIsDemoMode(true)
+              setBrowserFilters({ type: 'all', game: 'all', author: 'all', search: '' })
+              setPageMeta({
+                total: DEMO_CARDS.length,
+                hasMore: false,
+                indexed: true,
+                complete: true,
+                versionCounts: [],
+              })
               notify('已载入内置日系示范画廊', 'info')
             }}
             onQuickEditCard={(card) => void handleQuickEditCard(card)}
             onInspectScene={(card) => void handleInspectSceneFromGallery(card)}
-            onTagsSaved={(path, tags) => setCards(prev => prev.map(c => c.path === path ? { ...c, tags } : c))}
+            onTagsSaved={(path, tags) =>
+              setCards((prev) => prev.map((c) => (c.path === path ? { ...c, tags } : c)))
+            }
+            onAuthorSaved={(path, author, authorSource, authorHistory) =>
+              setCards((prev) =>
+                prev.map((c) =>
+                  c.path === path ? { ...c, author, authorSource, authorHistory } : c,
+                ),
+              )
+            }
+            onCardConverted={() => {
+              if (scannedDir.trim() && !isDemoMode) {
+                void handleScanDir(scannedDir)
+              }
+            }}
             onRevealFile={(p) => void backend.revealInExplorer(p)}
             onNotify={notify}
             onLog={appendLog}
@@ -860,6 +1198,11 @@ export const App: React.FC = () => {
               notify(`已复制 ${editorCard.modIds.length} 条 Mod GUID`, 'ok')
             }}
             onCheckCardMods={() => void handleCheckEditorMods()}
+            onCardConverted={() => {
+              if (scannedDir.trim() && !isDemoMode) {
+                void handleScanDir(scannedDir)
+              }
+            }}
             onNotify={notify}
             onLog={appendLog}
           />
@@ -1008,6 +1351,11 @@ export const App: React.FC = () => {
             `检测完成：已装 ${res.data.present.length} 项，缺失 ${res.data.missing.length} 项`,
             res.data.missing.length > 0 ? 'warn' : 'ok',
           )
+        }}
+        onCardConverted={() => {
+          if (scannedDir.trim() && !isDemoMode) {
+            void handleScanDir(scannedDir)
+          }
         }}
         onNotify={notify}
         onLog={appendLog}

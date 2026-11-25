@@ -62,6 +62,27 @@ def _make_handler(bridge: KKToolsBridge, dist_dir: Path):
         def log_message(self, format: str, *args) -> None:  # noqa: A002
             return
 
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path.startswith("/thumb/"):
+                host = self.headers.get("Host", "")
+                if host != f"127.0.0.1:{self.server.server_port}":
+                    self.send_error(403)
+                    return
+                token = self.path[len("/thumb/") :].split("?", 1)[0].strip("/")
+                res = bridge.get_thumbnail_bytes(token)
+                if res is None:
+                    self.send_error(404)
+                    return
+                payload, mime = res
+                self.send_response(200)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Cache-Control", "private, max-age=86400")
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            super().do_GET()
+
         def do_POST(self) -> None:  # noqa: N802
             if not self.path.startswith("/api/"):
                 self.send_error(404)
@@ -77,7 +98,11 @@ def _make_handler(bridge: KKToolsBridge, dist_dir: Path):
                 self._send_json({"ok": False, "error": "仅接受 JSON 请求"}, 415)
                 return
             method_name = self.path[len("/api/") :].strip("/")
-            if method_name.startswith("_") or method_name == "bind_window" or not callable(getattr(bridge, method_name, None)):
+            if (
+                method_name.startswith("_")
+                or method_name in ("bind_window", "get_thumbnail_bytes")
+                or not callable(getattr(bridge, method_name, None))
+            ):
                 self._send_json({"ok": False, "error": f"未知接口：{method_name}"}, 404)
                 return
             try:

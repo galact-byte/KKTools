@@ -2,6 +2,8 @@ import type {
   AppConfig,
   CardDetail,
   CardModCheckResult,
+  CardPageQueryOptions,
+  CardPageResult,
   CardSummary,
   ModSummaryItem,
   SceneAnalysisResult,
@@ -21,6 +23,8 @@ export interface BridgeResult<T> {
   ok: boolean
   data?: T
   error?: string
+  cancelled?: boolean
+  resultExpired?: boolean
 }
 
 async function callBackend<T>(method: string, ...args: unknown[]): Promise<BridgeResult<T>> {
@@ -61,10 +65,33 @@ export async function waitTask<T>(
     const state = res.data
     onProgress?.(state)
     if (state.status === 'done') {
-      return { ok: true, data: state.result }
+      const resultExpired = Boolean(state.resultExpired)
+      const data = state.result === null ? undefined : state.result
+      await callBackend<boolean>('release_task', taskId)
+      return { ok: true, data, resultExpired }
+    }
+    if (state.status === 'cancelled') {
+      await callBackend<boolean>('release_task', taskId)
+      return { ok: false, cancelled: true, error: state.message || '任务已取消' }
     }
     if (state.status === 'error') {
+      await callBackend<boolean>('release_task', taskId)
       return { ok: false, error: state.error || '后台任务执行失败' }
+    }
+    await new Promise((r) => window.setTimeout(r, intervalMs))
+  }
+}
+
+export async function cancelAndReleaseTask(taskId: string, intervalMs = 150): Promise<void> {
+  if (!taskId) return
+  await callBackend<boolean>('cancel_task', taskId)
+  // 等待任务真正退出 running 后再释放，避免运行中直接 release_task 失败
+  for (let i = 0; i < 80; i += 1) {
+    const res = await callBackend<TaskState<unknown>>('poll_task', taskId)
+    if (!res.ok || !res.data) return
+    if (res.data.status !== 'running') {
+      await callBackend<boolean>('release_task', taskId)
+      return
     }
     await new Promise((r) => window.setTimeout(r, intervalMs))
   }
@@ -104,6 +131,46 @@ export const backend = {
   // 浏览与卡片编辑
   scanDirectory: (directory: string, recursive: boolean) =>
     callBackend<CardSummary[]>('scan_directory', directory, recursive),
+  startScanDirectory: (directory: string, recursive: boolean, paged = false) =>
+    paged
+      ? callBackend<{ taskId: string }>('start_scan_directory', directory, Boolean(recursive), true)
+      : callBackend<{ taskId: string }>('start_scan_directory', directory, Boolean(recursive)),
+  queryCardPage: (directory: string, options: CardPageQueryOptions = {}) =>
+    callBackend<CardPageResult>('query_card_page', directory, options),
+  cancelTask: (taskId: string) => callBackend<boolean>('cancel_task', taskId),
+  releaseTask: (taskId: string) => callBackend<boolean>('release_task', taskId),
+  getCardAuthor: (path: string) =>
+    callBackend<{
+      author: string
+      authorSource: 'card' | 'manual' | 'userid' | ''
+      manualAuthor: string
+      cardAuthor: string
+      authorHistory: string[]
+      userId: string
+    }>('get_card_author', path),
+  setCardAuthor: (path: string, author: string) =>
+    callBackend<{
+      author: string
+      authorSource: 'card' | 'manual' | 'userid' | ''
+      manualAuthor: string
+      cardAuthor: string
+      authorHistory: string[]
+      userId: string
+    }>('set_card_author', path, author),
+  convertCard: (path: string, target: 'KK' | 'KKS', outDir = '') =>
+    callBackend<{
+      sourcePath: string
+      savedPath: string
+      type: string
+      sourceGame: string
+      targetGame: string
+    }>('convert_card', path, target, outDir),
+  startBatchConvertCards: (opts: {
+    sources: string[]
+    target: 'KK' | 'KKS'
+    outDir: string
+    recursive?: boolean
+  }) => callBackend<{ taskId: string }>('start_batch_convert_cards', opts),
   inspectFile: (path: string) =>
     callBackend<{ path: string; type: string; game: string; name: string }>('inspect_file', path),
   loadCard: (path: string) => callBackend<CardDetail>('load_card', path),
