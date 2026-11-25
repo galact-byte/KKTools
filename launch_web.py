@@ -37,6 +37,28 @@ def resolve_dist_dir() -> Path:
     return ROOT / "web" / "dist"
 
 
+def resolve_icon_path() -> Path | None:
+    """定位桌面窗口图标（兼容 PyInstaller --onefile 与源码运行）。"""
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            cand = Path(meipass) / "assets" / "kktools.ico"
+            if cand.is_file():
+                return cand
+    cand = ROOT / "assets" / "kktools.ico"
+    return cand if cand.is_file() else None
+
+
+def _set_windows_app_id() -> None:
+    """设置独立 AppUserModelID，确保任务栏显示 KKTools 图标而非宿主 python.exe。"""
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KKTools.Studio.App")
+    except Exception:
+        pass
+
+
 def _confirm_windows(title: str, message: str) -> bool:
     """使用系统原生弹窗做关窗前二次确认（返回 True 表示允许关闭）。"""
     if sys.platform != "win32":
@@ -168,6 +190,9 @@ def launch_desktop() -> int:
     """启动 Edge WebView2 原生桌面窗口，内建未保存改动与后台任务关窗保护。"""
     import webview
 
+    _set_windows_app_id()
+    icon_path = resolve_icon_path()
+
     bridge = KKToolsBridge()
     server, port = start_local_server(bridge, port=0)
     url = f"http://127.0.0.1:{port}/"
@@ -191,7 +216,7 @@ def launch_desktop() -> int:
     window.events.closing += _on_closing
 
     try:
-        webview.start(gui="edgechromium")
+        webview.start(gui="edgechromium", icon=str(icon_path) if icon_path else None)
     finally:
         bridge.cleanup_pending_update()
         server.shutdown()

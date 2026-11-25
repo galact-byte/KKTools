@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="28 24 456 456" width="512" height="512">
+  <defs>
+    <!-- Soft sakura-milk gradients -->
+    <linearGradient id="bowLeft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FDE4EC"/>
+      <stop offset="55%" stop-color="#F6B8CB"/>
+      <stop offset="100%" stop-color="#E893AE"/>
+    </linearGradient>
+    <linearGradient id="bowRight" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FDE4EC"/>
+      <stop offset="55%" stop-color="#F6B8CB"/>
+      <stop offset="100%" stop-color="#E893AE"/>
+    </linearGradient>
+    <linearGradient id="bowInner" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#DF83A1"/>
+      <stop offset="100%" stop-color="#F1A7BF"/>
+    </linearGradient>
+    <linearGradient id="tailL" x1="0.3" y1="0" x2="0.7" y2="1">
+      <stop offset="0%" stop-color="#EAA0B8"/>
+      <stop offset="100%" stop-color="#FAD4E0"/>
+    </linearGradient>
+    <linearGradient id="tailR" x1="0.7" y1="0" x2="0.3" y2="1">
+      <stop offset="0%" stop-color="#EAA0B8"/>
+      <stop offset="100%" stop-color="#FAD4E0"/>
+    </linearGradient>
+    <!-- Airy sky-blue translucent backing ring (subtle tool/studio precision halo) -->
+    <linearGradient id="skyRing" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0%" stop-color="#D9EEFE"/>
+      <stop offset="55%" stop-color="#A5D5FA"/>
+      <stop offset="100%" stop-color="#7BB9EE"/>
+    </linearGradient>
+    <linearGradient id="gemTop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#B9E1FD"/>
+    </linearGradient>
+    <linearGradient id="gemBot" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#9BD0FA"/>
+      <stop offset="100%" stop-color="#6DAEEB"/>
+    </linearGradient>
+    <filter id="softDrop1" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#4A648C" flood-opacity="0.24"/>
+    </filter>
+    <filter id="gemDrop1" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#873D5A" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#softDrop1)">
+    <!-- Subtle airy pale-blue studio precision ring behind the ribbon (gives balanced silhouette) -->
+    <circle cx="256" cy="244" r="168" fill="#F2F8FE" fill-opacity="0.88" stroke="url(#skyRing)" stroke-width="18"/>
+    <!-- Minimal precision tick notches at 12/3/6/9 o'clock (subtle tool craft without clipart gear) -->
+    <g fill="#7BB9EE">
+      <rect x="249" y="54" width="14" height="28" rx="7"/>
+      <rect x="249" y="406" width="14" height="28" rx="7"/>
+      <rect x="66" y="237" width="28" height="14" rx="7"/>
+      <rect x="418" y="237" width="28" height="14" rx="7"/>
+    </g>
+
+    <!-- Ribbon tails (clean tapered geometric silk ribbons) -->
+    <path d="M 226 266 L 140 426 L 194 402 L 222 444 L 252 288 Z" fill="url(#tailL)" stroke="#D97E9D" stroke-opacity="0.35" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M 286 266 L 372 426 L 318 402 L 290 444 L 260 288 Z" fill="url(#tailR)" stroke="#D97E9D" stroke-opacity="0.35" stroke-width="2.5" stroke-linejoin="round"/>
+
+    <!-- Left & Right ribbon loops (crisp flat-layered Japanese illustration geometry, NO thick cartoon outline) -->
+    <path d="M 244 238 C 194 166, 98 142, 72 184 C 48 224, 62 296, 108 318 C 154 338, 212 292, 244 266 Z"
+          fill="url(#bowLeft)" stroke="#D97E9D" stroke-opacity="0.35" stroke-width="2.5"/>
+    <path d="M 268 238 C 318 166, 414 142, 440 184 C 464 224, 450 296, 404 318 C 358 338, 300 292, 268 266 Z"
+          fill="url(#bowRight)" stroke="#D97E9D" stroke-opacity="0.35" stroke-width="2.5"/>
+
+    <!-- Subtle inner silk folds -->
+    <path d="M 236 248 C 190 226, 138 224, 110 246 C 142 260, 192 268, 236 258 Z" fill="url(#bowInner)" fill-opacity="0.52"/>
+    <path d="M 276 248 C 322 226, 374 224, 402 246 C 370 260, 320 268, 276 258 Z" fill="url(#bowInner)" fill-opacity="0.52"/>
+
+    <!-- Faceted icy-blue crystal knot at center -->
+    <g filter="url(#gemDrop1)">
+      <polygon points="256,192 308,248 256,304 204,248" fill="url(#gemBot)" stroke="#FFFFFF" stroke-width="3" stroke-linejoin="round"/>
+      <polygon points="256,192 308,248 256,248 204,248" fill="url(#gemTop)"/>
+      <polygon points="256,214 286,248 256,282 226,248" fill="#FFFFFF" fill-opacity="0.45"/>
+    </g>
+  </g>
+</svg>

@@ -73,7 +73,14 @@ jobs:
           from PyInstaller.archive.readers import CArchiveReader
           archive = CArchiveReader('dist/KKTools.exe')
           names = {name.replace('\\', '/') for name in archive.toc}
-          for required in ['web/dist/index.html', 'core/update_helper.ps1', 'core/build_info.json']:
+          for required in [
+              'web/dist/index.html',
+              'web/dist/logo.png',
+              'web/dist/favicon.ico',
+              'assets/kktools.ico',
+              'core/update_helper.ps1',
+              'core/build_info.json',
+          ]:
               assert required in names, required
           assert not any('PyQt6' in name or name.startswith('ui/') for name in names)
 

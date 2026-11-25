@@ -14,7 +14,6 @@ import {
   Settings,
   Share2,
   SlidersHorizontal,
-  Sparkles,
 } from 'lucide-react'
 import { THEMES } from '../data/constants'
 import type { PageId, ThemeId } from '../types/kk'
@@ -172,15 +171,12 @@ export const AppShell: React.FC<AppShellProps> = ({
             title={collapsed ? '点击展开导航栏' : 'KKTools'}
             className={`flex items-center gap-2.5 overflow-hidden text-left ${collapsed ? 'cursor-pointer' : 'cursor-default'}`}
           >
-            <div
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px]"
-              style={{
-                backgroundColor: 'var(--primary)',
-                color: 'var(--on-primary)',
-              }}
-            >
-              <Sparkles size={16} strokeWidth={2.2} />
-            </div>
+            <img
+              src="./logo.png"
+              alt="KKTools"
+              draggable={false}
+              className="h-8 w-8 shrink-0 select-none"
+            />
             {!collapsed && (
               <div className="min-w-0 leading-tight">
                 <div className="flex items-center gap-1.5">

@@ -19,7 +19,7 @@ import uuid
 
 from core import settings
 
-APP_VERSION = "v0.9.0"
+APP_VERSION = "v0.9.1"
 REPOSITORY = "galact-byte/KKTools"
 RELEASES_URL = f"https://github.com/{REPOSITORY}/releases/latest"
 _API_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"

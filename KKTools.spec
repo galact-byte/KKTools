@@ -7,6 +7,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('web/dist', 'web/dist'),
+        ('assets/kktools.ico', 'assets'),
         ('core/build_info.json', 'core'),
         ('core/update_helper.ps1', 'core'),
     ],
@@ -39,4 +40,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets/kktools.ico',
 )
